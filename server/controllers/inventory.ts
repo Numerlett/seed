@@ -77,7 +77,7 @@ export const getProducts = protectedProcedure
         isActive,
         stockStatus,
       },
-      ctx
+      ctx,
     }) => {
       try {
         const where: any = { businessId };
@@ -138,7 +138,7 @@ export const getProducts = protectedProcedure
           }),
           prisma.product.count({ where }),
         ]);
-        
+
         return { products, totalCount };
       } catch (error: unknown) {
         handleControllerError(error, {

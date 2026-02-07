@@ -16,11 +16,11 @@ export interface PrismaErrorInfo {
 
 /**
  * Handles Prisma errors and converts them to standardized tRPC error information
- * 
+ *
  * @param error - The error thrown by Prisma
  * @param options - Additional options for error handling
  * @returns Standardized error information
- * 
+ *
  * @example
  * ```typescript
  * try {
@@ -33,13 +33,13 @@ export interface PrismaErrorInfo {
  */
 export function handlePrismaError(
   error: unknown,
-  options?: { includeDev?: boolean }
+  options?: { includeDev?: boolean },
 ): PrismaErrorInfo {
   const isDev = options?.includeDev ?? process.env.NODE_ENV !== 'production';
 
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     const meta = error.meta as Record<string, unknown> | undefined;
-    
+
     switch (error.code) {
       case 'P2000': {
         // Value too long for column
@@ -63,7 +63,9 @@ export function handlePrismaError(
           prismaCode: error.code,
           code: 'NOT_FOUND',
           status: 404,
-          message: cause || 'The record searched for in the where condition does not exist',
+          message:
+            cause ||
+            'The record searched for in the where condition does not exist',
           devDetails: isDev ? error.message : undefined,
         };
       }
@@ -293,7 +295,9 @@ export function handlePrismaError(
           code: 'INTERNAL_SERVER_ERROR',
           status: 500,
           message: 'A database error occurred',
-          devDetails: isDev ? `Prisma Error ${error.code}: ${error.message}` : undefined,
+          devDetails: isDev
+            ? `Prisma Error ${error.code}: ${error.message}`
+            : undefined,
         };
       }
     }
@@ -330,9 +334,10 @@ export function handlePrismaError(
   }
 
   // Unknown error type
-  const devDetails = isDev && error instanceof Error 
-    ? `${error.message}${error.stack ? '\n' + error.stack : ''}`
-    : undefined;
+  const devDetails =
+    isDev && error instanceof Error
+      ? `${error.message}${error.stack ? '\n' + error.stack : ''}`
+      : undefined;
 
   return {
     code: 'INTERNAL_SERVER_ERROR',

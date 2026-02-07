@@ -98,31 +98,31 @@ export const deleteBusiness = protectedProcedure
       const business = await prisma.business.findUnique({
         where: { id },
       });
-      
+
       if (!business || business.ownerId !== userId) {
         throw new TRPCError({
           code: 'NOT_FOUND',
           message: 'Business not found.',
         });
       }
-      
+
       const noOfBusinessesOwned = await prisma.business.count({
         where: {
           ownerId: userId,
-        }
+        },
       });
-      
+
       if (noOfBusinessesOwned === 1) {
         throw new TRPCError({
           code: 'CONFLICT',
           message: 'You cannot delete your last business.',
         });
       }
-      
+
       await prisma.business.delete({
         where: { id },
       });
-      
+
       return { business };
     } catch (error: unknown) {
       handleControllerError(error, {

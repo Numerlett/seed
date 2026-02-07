@@ -71,14 +71,14 @@ export const deleteCategory = protectedProcedure
           },
         },
       });
-      
+
       if (!category) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: 'You do not have permission to delete this category',
         });
       }
-      
+
       if (category._count.products > 0) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -89,7 +89,7 @@ export const deleteCategory = protectedProcedure
       await prisma.category.delete({
         where: { id: categoryId },
       });
-      
+
       return { success: true };
     } catch (error: unknown) {
       handleControllerError(error, {

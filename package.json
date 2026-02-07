@@ -8,7 +8,8 @@
     "start": "pnpm -r --parallel start",
     "build": "pnpm -r build",
     "clean": "pnpm -r clean",
-    "lint": "pnpm -r lint"
+    "lint": "pnpm -r lint",
+    "format": "prettier --write . --ignore-path .prettierignore --ignore-path .gitignore"
   },
   "keywords": [],
   "author": "",

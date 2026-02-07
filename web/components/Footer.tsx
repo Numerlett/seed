@@ -1,21 +1,21 @@
-import Link from "next/link";
-import Image from "next/image";
-import { appName } from "@/utils/data";
-import { FaGithub, FaTwitter, FaLinkedinIn } from "react-icons/fa";
+import Link from 'next/link';
+import Image from 'next/image';
+import { appName } from '@/utils/data';
+import { FaGithub, FaTwitter, FaLinkedinIn } from 'react-icons/fa';
 
 export default function Footer() {
   const footerLinks = [
-    { name: "About", href: "/about" },
-    { name: "Contact", href: "/contact" },
-    { name: "Events", href: "/events" },
-    { name: "Privacy", href: "/privacy" },
-    { name: "Terms", href: "/terms" },
+    { name: 'About', href: '/about' },
+    { name: 'Contact', href: '/contact' },
+    { name: 'Events', href: '/events' },
+    { name: 'Privacy', href: '/privacy' },
+    { name: 'Terms', href: '/terms' },
   ];
 
   const socialLinks = [
-    { icon: FaGithub, href: "https://github.com", label: "GitHub" },
-    { icon: FaTwitter, href: "https://twitter.com", label: "Twitter" },
-    { icon: FaLinkedinIn, href: "https://linkedin.com", label: "LinkedIn" },
+    { icon: FaGithub, href: 'https://github.com', label: 'GitHub' },
+    { icon: FaTwitter, href: 'https://twitter.com', label: 'Twitter' },
+    { icon: FaLinkedinIn, href: 'https://linkedin.com', label: 'LinkedIn' },
   ];
 
   return (
@@ -71,8 +71,8 @@ export default function Footer() {
         {/* Bottom Section */}
         <div className="flex flex-col items-center justify-between gap-4 text-center md:flex-row md:text-left">
           <p className="text-muted-foreground text-xs">
-            © {new Date().getFullYear()} {appName}. Virtual trading platform
-            for educational purposes only.
+            © {new Date().getFullYear()} {appName}. Virtual trading platform for
+            educational purposes only.
           </p>
           <p className="text-muted-foreground text-xs">
             All trades are simulated with virtual money.

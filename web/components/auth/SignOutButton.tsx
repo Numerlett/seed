@@ -1,12 +1,12 @@
-"use client";
-import { Loader2Icon, LogOutIcon } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { useTransition } from "react";
-import { Button } from "@/components/ui/button";
-import { useSession } from "@/providers/SessionProvider";
+'use client';
+import { Loader2Icon, LogOutIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { useTransition } from 'react';
+import { Button } from '@/components/ui/button';
+import { useSession } from '@/providers/SessionProvider';
 
 export default function SignOutButton({
-  className = "",
+  className = '',
   redirect = false,
 }: {
   className?: string;
@@ -24,7 +24,7 @@ export default function SignOutButton({
         });
       }}
       disabled={signingOut}
-      variant={"destructive"}
+      variant={'destructive'}
       className={cn(`active:scale-90 ${className}`)}
     >
       {signingOut ? (
@@ -32,7 +32,7 @@ export default function SignOutButton({
       ) : (
         <LogOutIcon className="size-4" />
       )}
-      {signingOut ? "Signing Out..." : "Sign Out"}
+      {signingOut ? 'Signing Out...' : 'Sign Out'}
     </Button>
   );
 }

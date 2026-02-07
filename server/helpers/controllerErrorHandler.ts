@@ -15,17 +15,17 @@ export interface ErrorContext {
 
 /**
  * Standardized error handler for all controllers
- * 
+ *
  * This function provides consistent error handling across the application by:
  * - Passing through existing TRPCErrors without modification
  * - Converting Prisma errors to appropriate tRPC errors
  * - Providing context-aware error messages
  * - Logging errors appropriately
- * 
+ *
  * @param error - The error that was caught
  * @param context - Context information about the operation
  * @throws {TRPCError} Always throws a TRPCError
- * 
+ *
  * @example
  * ```typescript
  * try {
@@ -40,7 +40,7 @@ export interface ErrorContext {
  */
 export function handleControllerError(
   error: unknown,
-  context: ErrorContext
+  context: ErrorContext,
 ): never {
   // If it's already a TRPCError, preserve it (don't double-wrap)
   if (error instanceof TRPCError) {
@@ -51,7 +51,7 @@ export function handleControllerError(
 
   // Handle Prisma errors with enhanced error information
   const prismaErrorInfo = handlePrismaError(error, { includeDev: true });
-  
+
   // Construct detailed message - prefer Prisma-specific errors when available
   let message: string;
   if (context.fallbackMessage && !prismaErrorInfo.message) {
@@ -59,8 +59,8 @@ export function handleControllerError(
     message = context.fallbackMessage;
   } else if (prismaErrorInfo.message) {
     // Use Prisma message, optionally prefix with operation context
-    message = context.fallbackMessage 
-      ? context.fallbackMessage 
+    message = context.fallbackMessage
+      ? context.fallbackMessage
       : `Failed to ${context.operation}: ${prismaErrorInfo.message}`;
   } else {
     // Default fallback
@@ -80,7 +80,7 @@ export function handleControllerError(
 
 /**
  * Logs error information based on environment
- * 
+ *
  * @param error - The error to log
  * @param context - Context information about the operation
  * @param prismaInfo - Optional Prisma error information
@@ -88,10 +88,10 @@ export function handleControllerError(
 function logError(
   error: TRPCError | Error,
   context: ErrorContext,
-  prismaInfo?: ReturnType<typeof handlePrismaError>
+  prismaInfo?: ReturnType<typeof handlePrismaError>,
 ): void {
   const isDev = process.env.NODE_ENV !== 'production';
-  
+
   if (isDev) {
     console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.error(`❌ Error during: ${context.operation}`);
@@ -129,14 +129,14 @@ function logError(
 
 /**
  * Helper to create a standardized context object
- * 
+ *
  * @param operation - The operation being performed
  * @param additionalContext - Additional context properties
  * @returns ErrorContext object
  */
 export function createErrorContext(
   operation: string,
-  additionalContext?: Partial<Omit<ErrorContext, 'operation'>>
+  additionalContext?: Partial<Omit<ErrorContext, 'operation'>>,
 ): ErrorContext {
   return {
     operation,

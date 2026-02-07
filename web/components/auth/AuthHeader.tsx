@@ -1,5 +1,5 @@
-import ThemeSwitch from "@/components/ThemeSwitch";
-import Logo from "@/components/Logo";
+import ThemeSwitch from '@/components/ThemeSwitch';
+import Logo from '@/components/Logo';
 
 export default function AuthHeader() {
   return (

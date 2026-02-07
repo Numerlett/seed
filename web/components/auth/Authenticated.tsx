@@ -1,7 +1,7 @@
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { CheckCheckIcon, HomeIcon } from "lucide-react";
-import SignOutButton from "@/components/auth/SignOutButton";
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
+import { CheckCheckIcon, HomeIcon } from 'lucide-react';
+import SignOutButton from '@/components/auth/SignOutButton';
 
 export default function Authenticated() {
   return (

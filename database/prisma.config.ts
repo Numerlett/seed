@@ -13,6 +13,7 @@ export default defineConfig({
   },
   datasource: {
     url:
-      process.env.DATABASE_URL || 'postgresql://postgres:1234567890@localhost:5432/seed',
+      process.env.DATABASE_URL ||
+      'postgresql://postgres:1234567890@localhost:5432/seed',
   },
 });

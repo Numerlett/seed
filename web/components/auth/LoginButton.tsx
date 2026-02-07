@@ -1,14 +1,14 @@
-"use client";
+'use client';
 
-import { Button } from "@/components/ui/button";
-import { LogInIcon } from "lucide-react";
-import { usePathname, useRouter } from "next/navigation";
-import GoogleButton from "./GoogleButton";
-import { ButtonGroup } from "../ui/button-group";
-import { cn } from "@/lib/utils";
+import { Button } from '@/components/ui/button';
+import { LogInIcon } from 'lucide-react';
+import { usePathname, useRouter } from 'next/navigation';
+import GoogleButton from './GoogleButton';
+import { ButtonGroup } from '../ui/button-group';
+import { cn } from '@/lib/utils';
 
 export default function LoginButton({
-  className = "",
+  className = '',
   rounded = true,
 }: {
   className?: string;
@@ -21,19 +21,19 @@ export default function LoginButton({
   };
 
   return (
-    <ButtonGroup className={cn(className, "rounded-full")}>
+    <ButtonGroup className={cn(className, 'rounded-full')}>
       <Button
-        variant={"outline"}
+        variant={'outline'}
         onClick={handleClick}
-        className={cn(rounded ? "rounded-l-full" : "")}
+        className={cn(rounded ? 'rounded-l-full' : '')}
       >
         <LogInIcon />
         Log In
       </Button>
       <GoogleButton
-        type={"refresh"}
+        type={'refresh'}
         showText={false}
-        className={cn(rounded ? "rounded-r-full" : "")}
+        className={cn(rounded ? 'rounded-r-full' : '')}
       />
     </ButtonGroup>
   );

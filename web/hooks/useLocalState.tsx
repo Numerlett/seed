@@ -1,14 +1,14 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
+import { useState, useEffect } from 'react';
 
 function useLocalState<T>(
   key: string,
-  initialValue: T
+  initialValue: T,
 ): [T, React.Dispatch<React.SetStateAction<T>>] {
   // Initialize state with localStorage value if available (client-side only)
   const [state, setState] = useState<T>(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === 'undefined') {
       return initialValue; // Server-side: use initialValue
     }
     try {
@@ -17,7 +17,7 @@ function useLocalState<T>(
         ? (JSON.parse(storedValue) as T)
         : initialValue;
     } catch (error) {
-      console.error("Error reading localStorage key “" + key + "”: ", error);
+      console.error('Error reading localStorage key “' + key + '”: ', error);
       return initialValue;
     }
   });
@@ -27,7 +27,7 @@ function useLocalState<T>(
     try {
       localStorage.setItem(key, JSON.stringify(state));
     } catch (error) {
-      console.error("Error setting localStorage key “" + key + "”: ", error);
+      console.error('Error setting localStorage key “' + key + '”: ', error);
     }
   }, [key, state]);
 

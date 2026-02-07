@@ -176,7 +176,10 @@ export const emailLogin = publicProcedure
       await prisma.otp.deleteMany({
         where: {
           email,
-          OR: [{ expiresAt: { lt: new Date() } }, { verifiedAt: { not: null } }],
+          OR: [
+            { expiresAt: { lt: new Date() } },
+            { verifiedAt: { not: null } },
+          ],
         },
       });
 

@@ -1,6 +1,6 @@
-import otpEmailTemplate from "./otpEmailTemplate";
-import welcomeEmailTemplate from "./welcomeEmailTemplate";
-import { Request, Response } from "express";
+import otpEmailTemplate from './otpEmailTemplate';
+import welcomeEmailTemplate from './welcomeEmailTemplate';
+import { Request, Response } from 'express';
 
 export const emailTemplateHandler = (req: Request, res: Response) => {
   const { type } = req.query;
@@ -31,4 +31,4 @@ export const emailTemplateHandler = (req: Request, res: Response) => {
       </div>
       `);
   }
-}
+};

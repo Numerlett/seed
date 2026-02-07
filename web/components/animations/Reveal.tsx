@@ -1,25 +1,25 @@
-"use client";
-import { motion, useAnimation, useInView } from "framer-motion";
-import { useEffect, useRef } from "react";
+'use client';
+import { motion, useAnimation, useInView } from 'framer-motion';
+import { useEffect, useRef } from 'react';
 
-import { ReactNode } from "react";
+import { ReactNode } from 'react';
 
 export default function Reveal({
   children,
-  className = "",
-  type = "bottomUp",
+  className = '',
+  type = 'bottomUp',
   duration = 0.6,
   delay = 0,
 }: {
   children: ReactNode;
   className?: string;
   type?:
-    | "bottomUp"
-    | "topDown"
-    | "scaleOut"
-    | "leftRight"
-    | "rightLeft"
-    | "fadeIn";
+    | 'bottomUp'
+    | 'topDown'
+    | 'scaleOut'
+    | 'leftRight'
+    | 'rightLeft'
+    | 'fadeIn';
   duration?: number;
   delay?: number;
 }) {
@@ -29,9 +29,9 @@ export default function Reveal({
 
   useEffect(() => {
     if (isInView) {
-      controls.start("visible");
+      controls.start('visible');
     } else {
-      controls.set("hidden");
+      controls.set('hidden');
     }
   }, [isInView, controls]);
 
