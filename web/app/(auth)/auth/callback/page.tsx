@@ -31,9 +31,8 @@ export default function GoogleCallback() {
 
   useEffect(() => {
     if (!code) return;
-
     googleCallbackMutation.mutate({ code });
-  }, [code, googleCallbackMutation]);
+  }, [code]);
 
   if (!code) {
     return (

@@ -40,68 +40,6 @@ export const productSchema = z.object({
   categoryId: z.string().optional(),
 });
 
-// Client-side form schema (for react-hook-form)
-// export const productFormSchema = z.object({
-//   name: z
-//     .string()
-//     .min(1, 'Name is required')
-//     .max(100, 'Name must be less than 100 characters'),
-//   description: z.string().max(255).optional(),
-//   sku: z.string().min(1, 'SKU is required'),
-//   barcode: z.string().optional(),
-//   brand: z.string().optional(),
-//   model: z.string().optional(),
-//   color: z.string().optional(),
-//   size: z.string().optional(),
-//   weight: z
-//     .string()
-//     .optional()
-//     .transform((val) => (val ? parseFloat(val) : undefined)),
-//   dimensions: z.string().optional(),
-//   image: z.string().optional(),
-//   attachments: z
-//     .string()
-//     .optional()
-//     .transform((val) => (val ? val.split(',').map((s) => s.trim()) : [])),
-//   unit: z.string().default('pcs'),
-//   secondaryUnit: z.string().optional(),
-//   unitConvertion: z
-//     .string()
-//     .optional()
-//     .transform((val) => (val ? parseFloat(val) : undefined)),
-//   currentStockLevel: z.string().transform((val) => parseFloat(val || '0')),
-//   minStockLevel: z
-//     .string()
-//     .optional()
-//     .transform((val) => (val ? parseFloat(val) : undefined)),
-//   maxStockLevel: z
-//     .string()
-//     .optional()
-//     .transform((val) => (val ? parseFloat(val) : undefined)),
-//   reorderLevel: z
-//     .string()
-//     .optional()
-//     .transform((val) => (val ? parseFloat(val) : undefined)),
-//   costPrice: z
-//     .string()
-//     .min(1, 'Cost price is required')
-//     .transform((val) => parseFloat(val)),
-//   sellingPrice: z
-//     .string()
-//     .min(1, 'Selling price is required')
-//     .transform((val) => parseFloat(val)),
-//   mrp: z
-//     .string()
-//     .optional()
-//     .transform((val) => (val ? parseFloat(val) : undefined)),
-//   taxRate: z.string().transform((val) => parseFloat(val || '0')),
-//   discountRate: z.string().transform((val) => parseFloat(val || '0')),
-//   isActive: z.boolean().default(true),
-//   isService: z.boolean().default(false),
-//   allowNegative: z.boolean().default(false),
-//   categoryId: z.string().optional(),
-// });
-
 export const productFormSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
   description: z.string().optional(),

@@ -183,3 +183,43 @@ model Product {
 // PARTY MANAGEMENT
 // -----------------------------------------------------
 
+model Party {
+  id          String   @id @default(cuid())
+  name        String
+  email       String?
+  phone       String?
+  partyType   PartyType
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  addresses     Address[]
+
+  @@index([name])
+  @@map("parties")
+}
+
+enum PartyType {
+  CUSTOMER
+  SUPPLIER
+  BOTH
+}
+
+
+
+
+model Address {
+  id         String   @id @default(cuid())
+  line1      String
+  line2      String?
+  city       String
+  state      String
+  postalCode String
+  country    String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  partyId String?
+  party   Party?   @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@map("addresses")
+}

@@ -1,6 +1,6 @@
 'use client';
 
-import { Building2Icon, ChevronsUpDown } from 'lucide-react';
+import { Building2Icon, CheckIcon, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
@@ -10,7 +10,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
-import { FaCheck } from 'react-icons/fa';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import AddNewBusiness from './AddNewBusiness';
@@ -90,7 +89,7 @@ export default function BusinessSwitcher({ expanded }: { expanded: boolean }) {
                   <span className="truncate">{membership.business.name}</span>
                 </div>
                 {businessMembershipId === membership.id && (
-                  <FaCheck className="text-primary shrink-0" />
+                  <CheckIcon className="text-primary shrink-0" />
                 )}
                 <Badge className="ml-2">{membership.role}</Badge>
               </div>

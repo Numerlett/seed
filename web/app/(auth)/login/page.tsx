@@ -16,7 +16,9 @@ import {
 import { REGEXP_ONLY_DIGITS_AND_CHARS } from 'input-otp';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from '@/providers/SessionProvider';
-import Countdown, { CountdownRendererFn } from 'react-countdown';
+import _Countdown, { CountdownRendererFn } from 'react-countdown';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const Countdown = _Countdown as any;
 import { ErrorAlertDialog } from '@/components/ui/error-alert-dialog';
 import { clientTrpc } from '@seed/api/client';
 
@@ -166,10 +168,10 @@ export default function LoginPage() {
             )}
             <InputOTP
               value={otp}
-              onChange={(otp) => setOtp(otp)}
+              onChange={(otp: string) => setOtp(otp)}
               maxLength={6}
               pattern={REGEXP_ONLY_DIGITS_AND_CHARS}
-              onKeyDown={(e) => {
+              onKeyDown={(e: React.KeyboardEvent) => {
                 if (e.key === 'Enter') {
                   verifyOtp();
                 }
