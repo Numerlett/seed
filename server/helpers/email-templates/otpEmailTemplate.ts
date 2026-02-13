@@ -49,77 +49,52 @@ const otpEmailTemplate = ({
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>Your OTP Code</title>
-      <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-      <script>
-        function copyOTP() {
-          navigator.clipboard.writeText('${otp}').then(function() {
-            const btn = document.getElementById('copyBtn');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = 'Copied!';
-            btn.classList.add('bg-green-600');
-            btn.classList.remove('bg-neutral-900', 'hover:bg-neutral-800');
-            setTimeout(function() {
-              btn.innerHTML = originalText;
-              btn.classList.remove('bg-green-600');
-              btn.classList.add('bg-neutral-900', 'hover:bg-neutral-800');
-            }, 2000);
-          });
-        }
-      </script>
     </head>
-    <body class="m-0 p-0 bg-neutral-50">
-      <div class="max-w-lg mx-auto my-12 px-4">
-        <div class="bg-white border border-neutral-200 rounded-lg overflow-hidden">
-          <div class="px-8 pt-8 pb-6">
-            <div class="mb-6">
-              <div class="text-2xl font-bold text-neutral-900 mb-3 text-center">SEED</div>
-              <h1 class="text-xl font-semibold text-neutral-900 m-0">Verify your email</h1>
-              <p class="text-sm text-neutral-600 mt-2 m-0">
+    <body style="margin: 0; padding: 0; background-color: #fafafa;">
+      <div style="max-width: 32rem; margin-left: auto; margin-right: auto; margin-top: 3rem; margin-bottom: 3rem; padding-left: 1rem; padding-right: 1rem;">
+        <div style="background-color: #ffffff; border: 1px solid #e5e5e5; border-radius: 0.5rem; overflow: hidden;">
+          <div style="padding-left: 2rem; padding-right: 2rem; padding-top: 2rem; padding-bottom: 1.5rem;">
+            <div style="margin-bottom: 1.5rem;">
+              <div style="font-size: 1.5rem; line-height: 2rem; font-weight: 700; color: #171717; margin-bottom: 0.75rem; text-align: center;">SEED</div>
+              <h1 style="font-size: 1.25rem; line-height: 1.75rem; font-weight: 600; color: #171717; margin: 0;">Verify your email</h1>
+              <p style="font-size: 0.875rem; line-height: 1.25rem; color: #525252; margin-top: 0.5rem; margin-bottom: 0; margin-left: 0; margin-right: 0;">
                 A sign in attempt requires verification
               </p>
             </div>
 
-            <div class="border-t border-neutral-200 pt-6">
-              <p class="text-sm text-neutral-700 m-0 mb-6">
-                Enter the following code to verify your account <span class="font-medium text-neutral-900">${to}</span>
+            <div style="border-top: 1px solid #e5e5e5; padding-top: 1.5rem;">
+              <p style="font-size: 0.875rem; line-height: 1.25rem; color: #404040; margin: 0; margin-bottom: 1.5rem;">
+                Enter the following code to verify your account <span style="font-weight: 500; color: #171717;">${to}</span>
               </p>
 
-              <div class="bg-neutral-50 border border-neutral-200 rounded-md p-6 mb-6">
-                <div class="text-center">
-                  <div class="text-[32px] font-mono font-semibold text-neutral-900 tracking-[0.3em] select-all">${otp}</div>
-                  <div class="text-xs text-neutral-500 mt-3">Expires ${expiryFormatted}</div>
+              <div style="background-color: #fafafa; border: 1px solid #e5e5e5; border-radius: 0.375rem; padding: 1.5rem; margin-bottom: 1.5rem;">
+                <div style="text-align: center;">
+                  <div style="font-size: 32px; line-height: 1; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-weight: 600; color: #171717; letter-spacing: 0.3em; user-select: all;">${otp}</div>
+                  <div style="font-size: 0.75rem; line-height: 1rem; color: #737373; margin-top: 0.75rem;">Expires ${expiryFormatted}</div>
                 </div>
               </div>
 
-              <button 
-                id="copyBtn"
-                onclick="copyOTP()" 
-                class="block w-full text-center bg-neutral-900 hover:bg-neutral-800 text-white text-sm font-medium py-2.5 px-4 rounded-md border-0 cursor-pointer transition-colors"
-              >
-                Copy OTP
-              </button>
-
-              <div class="mt-6 pt-6 border-t border-neutral-200">
-                <p class="text-xs text-neutral-500 m-0">
+              <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #e5e5e5;">
+                <p style="font-size: 0.75rem; line-height: 1rem; color: #737373; margin: 0;">
                   If you didn't attempt to sign in but received this email, please ignore it or 
-                  <a href="${frontendUrl}/support" target="_blank" class="text-neutral-900 underline">contact support</a> if you have concerns.
+                  <a href="${frontendUrl}/support" target="_blank" style="color: #171717; text-decoration: underline;">contact support</a> if you have concerns.
                 </p>
               </div>
             </div>
           </div>
 
-          <div class="bg-neutral-50 px-8 py-4 border-t border-neutral-200">
-            <div class="flex items-center justify-between text-xs text-neutral-500">
+          <div style="background-color: #fafafa; padding-left: 2rem; padding-right: 2rem; padding-top: 1rem; padding-bottom: 1rem; border-top: 1px solid #e5e5e5;">
+            <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.75rem; line-height: 1rem; color: #737373;">
               <span>© ${new Date().getFullYear()} Seed</span>
-              <div class="space-x-3">
-                <a href="${frontendUrl}" target="_blank" class="text-neutral-600 hover:text-neutral-900 no-underline">Home</a>
-                <a href="${frontendUrl}/support" target="_blank" class="text-neutral-600 hover:text-neutral-900 no-underline">Support</a>
+              <div>
+                <a href="${frontendUrl}" target="_blank" style="color: #525252; text-decoration: none; margin-right: 0.75rem;">Home</a>
+                <a href="${frontendUrl}/support" target="_blank" style="color: #525252; text-decoration: none;">Support</a>
               </div>
             </div>
           </div>
         </div>
 
-        <p class="text-center text-xs text-neutral-400 mt-6">
+        <p style="text-align: center; font-size: 0.75rem; line-height: 1rem; color: #a3a3a3; margin-top: 1.5rem;">
           This email was sent to ${to}
         </p>
       </div>

@@ -10,64 +10,63 @@ const welcomeEmailTemplate = ({ to }: { to: string }) => {
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>Welcome to SEED</title>
-      <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     </head>
-    <body class="m-0 p-0 bg-neutral-50">
-      <div class="max-w-lg mx-auto my-12 px-4">
-        <div class="bg-white border border-neutral-200 rounded-lg overflow-hidden">
-          <div class="px-8 pt-8 pb-6">
-            <div class="mb-6">
-              <div class="text-2xl font-bold text-neutral-900 mb-3 text-center">SEED</div>
-              <h1 class="text-xl font-semibold text-neutral-900 m-0">Welcome to SEED! 🌱</h1>
-              <p class="text-sm text-neutral-600 mt-2 m-0">
+    <body style="margin: 0; padding: 0; background-color: #fafafa;">
+      <div style="max-width: 32rem; margin-left: auto; margin-right: auto; margin-top: 3rem; margin-bottom: 3rem; padding-left: 1rem; padding-right: 1rem;">
+        <div style="background-color: #ffffff; border: 1px solid #e5e5e5; border-radius: 0.5rem; overflow: hidden;">
+          <div style="padding-left: 2rem; padding-right: 2rem; padding-top: 2rem; padding-bottom: 1.5rem;">
+            <div style="margin-bottom: 1.5rem;">
+              <div style="font-size: 1.5rem; line-height: 2rem; font-weight: 700; color: #171717; margin-bottom: 0.75rem; text-align: center;">SEED</div>
+              <h1 style="font-size: 1.25rem; line-height: 1.75rem; font-weight: 600; color: #171717; margin: 0;">Welcome to SEED! 🌱</h1>
+              <p style="font-size: 0.875rem; line-height: 1.25rem; color: #525252; margin-top: 0.5rem; margin-bottom: 0; margin-left: 0; margin-right: 0;">
                 We're excited to have you on board
               </p>
             </div>
 
-            <div class="border-t border-neutral-200 pt-6">
-              <p class="text-sm text-neutral-700 m-0 mb-6">
+            <div style="border-top: 1px solid #e5e5e5; padding-top: 1.5rem;">
+              <p style="font-size: 0.875rem; line-height: 1.25rem; color: #404040; margin: 0; margin-bottom: 1.5rem;">
                 Hi there! Your account has been successfully created and you're all set to get started with SEED.
               </p>
 
-              <div class="bg-neutral-50 border border-neutral-200 rounded-md p-6 mb-6">
-                <h2 class="text-sm font-semibold text-neutral-900 m-0 mb-3">What's next?</h2>
-                <ul class="text-sm text-neutral-700 m-0 pl-5 space-y-2">
-                  <li>Complete your profile to personalize your experience</li>
-                  <li>Explore the dashboard and discover features</li>
-                  <li>Create your first business to start managing inventory</li>
-                  <li>Check out our help center if you need guidance</li>
+              <div style="background-color: #fafafa; border: 1px solid #e5e5e5; border-radius: 0.375rem; padding: 1.5rem; margin-bottom: 1.5rem;">
+                <h2 style="font-size: 0.875rem; line-height: 1.25rem; font-weight: 600; color: #171717; margin: 0; margin-bottom: 0.75rem;">What's next?</h2>
+                <ul style="font-size: 0.875rem; line-height: 1.25rem; color: #404040; margin: 0; padding-left: 1.25rem;">
+                  <li style="margin-top: 0.5rem;">Complete your profile to personalize your experience</li>
+                  <li style="margin-top: 0.5rem;">Explore the dashboard and discover features</li>
+                  <li style="margin-top: 0.5rem;">Create your first business to start managing inventory</li>
+                  <li style="margin-top: 0.5rem;">Check out our help center if you need guidance</li>
                 </ul>
               </div>
 
               <a 
                 href="${frontendUrl}/dashboard" 
-                class="block w-full text-center bg-neutral-900 hover:bg-neutral-800 text-white text-sm font-medium py-2.5 px-4 rounded-md no-underline transition-colors"
+                style="display: block; text-align: center; background-color: #171717; color: #ffffff; font-size: 0.875rem; line-height: 1.25rem; font-weight: 500; padding-top: 0.625rem; padding-bottom: 0.625rem; padding-left: 1rem; padding-right: 1rem; border-radius: 0.375rem; text-decoration: none; max-width: 100%;"
               >
                 Get Started
               </a>
 
-              <div class="mt-6 pt-6 border-t border-neutral-200">
-                <p class="text-xs text-neutral-500 m-0">
+              <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #e5e5e5;">
+                <p style="font-size: 0.75rem; line-height: 1rem; color: #737373; margin: 0;">
                   Need help getting started? Visit our 
-                  <a href="${frontendUrl}/support" target="_blank" class="text-neutral-900 underline">support center</a> 
+                  <a href="${frontendUrl}/support" target="_blank" style="color: #171717; text-decoration: underline;">support center</a> 
                   or reply to this email with any questions.
                 </p>
               </div>
             </div>
           </div>
 
-          <div class="bg-neutral-50 px-8 py-4 border-t border-neutral-200">
-            <div class="flex items-center justify-between text-xs text-neutral-500">
+          <div style="background-color: #fafafa; padding-left: 2rem; padding-right: 2rem; padding-top: 1rem; padding-bottom: 1rem; border-top: 1px solid #e5e5e5;">
+            <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.75rem; line-height: 1rem; color: #737373;">
               <span>© ${new Date().getFullYear()} Seed</span>
-              <div class="space-x-3">
-                <a href="${frontendUrl}" target="_blank" class="text-neutral-600 hover:text-neutral-900 no-underline">Home</a>
-                <a href="${frontendUrl}/support" target="_blank" class="text-neutral-600 hover:text-neutral-900 no-underline">Support</a>
+              <div>
+                <a href="${frontendUrl}" target="_blank" style="color: #525252; text-decoration: none; margin-right: 0.75rem;">Home</a>
+                <a href="${frontendUrl}/support" target="_blank" style="color: #525252; text-decoration: none;">Support</a>
               </div>
             </div>
           </div>
         </div>
 
-        <p class="text-center text-xs text-neutral-400 mt-6">
+        <p style="text-align: center; font-size: 0.75rem; line-height: 1rem; color: #a3a3a3; margin-top: 1.5rem;">
           This email was sent to ${to}
         </p>
       </div>
