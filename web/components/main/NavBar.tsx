@@ -68,68 +68,79 @@ export default function Navbar() {
   const { expanded } = useData();
 
   return (
-    <nav
+    <div
       className={cn(
-        `group navbar bg-sidebar z-10 row-start-2 row-end-3 flex h-full max-h-screen w-19 flex-col overflow-hidden border-r p-2.5 backdrop-blur-lg transition-all duration-300 ease-in-out hover:w-60`,
-        expanded ? 'w-60' : '',
+        'relative h-full transition-all duration-300 ease-in-out',
+        expanded ? 'w-60' : 'w-19',
       )}
     >
-      {/* Business Switcher at the top */}
-      <BusinessSwitcher expanded={expanded} />
+      <nav
+        className={cn(
+          'group navbar bg-sidebar flex h-full max-h-screen flex-col overflow-hidden border-r p-2.5 backdrop-blur-lg transition-all duration-300 ease-in-out',
+          expanded
+            ? 'w-60'
+            : 'absolute top-0 left-0 z-10 w-19 hover:w-60 hover:shadow-xl',
+        )}
+      >
+        {/* Business Switcher at the top */}
+        <BusinessSwitcher expanded={expanded} />
 
-      <Separator className="my-2" />
+        <Separator className="my-2" />
 
-      {/* Main navigation items */}
-      <div className="flex min-w-max flex-1 list-none flex-col gap-1 space-y-2 p-0 transition-all duration-200">
-        {navItems.map((navLink, index) => {
-          const active = pathname.startsWith(navLink.href);
-          return (
-            <Fragment key={index}>
-              {/* Separator before settings (last item) */}
-              {index === navItems.length - 1 && <Separator className="mt-3" />}
-              <Link
-                href={navLink.href}
-                className={cn(
-                  'hover:bg-muted relative flex cursor-pointer flex-row items-center rounded-xl',
+        {/* Main navigation items */}
+        <div className="flex min-w-max flex-1 list-none flex-col gap-1 space-y-2 p-0 transition-all duration-200">
+          {navItems.map((navLink, index) => {
+            const active = pathname.startsWith(navLink.href);
+            return (
+              <Fragment key={index}>
+                {/* Separator before settings (last item) */}
+                {index === navItems.length - 1 && (
+                  <Separator className="mt-3" />
                 )}
-                prefetch={true}
-              >
-                {/* Navigation icon */}
-                <navLink.icon
-                  className={`${active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'} peer m-2.5 size-8 rounded-lg p-1.5`}
-                />
-
-                {/* Collapsed state label (shows below icon when sidebar is collapsed) */}
-                <span
+                <Link
+                  href={navLink.href}
                   className={cn(
-                    `absolute left-7 -translate-x-1/2 text-xs`,
-                    active
-                      ? 'text-foreground top-[90%] font-bold'
-                      : 'text-muted-foreground top-[80%]',
-                    `transition-opacity duration-200 group-hover:pointer-events-none group-hover:opacity-0`,
-                    expanded ? 'pointer-events-none opacity-0' : '',
+                    'hover:bg-muted relative flex cursor-pointer flex-row items-center rounded-xl',
                   )}
+                  prefetch={true}
                 >
-                  {navLink.title}
-                </span>
+                  {/* Navigation icon */}
+                  <navLink.icon
+                    className={`${active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'} peer m-2.5 size-8 rounded-lg p-1.5`}
+                  />
 
-                {/* Expanded label */}
-                <span
-                  className={cn(
-                    `text-foreground pointer-events-none opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100`,
-                    active
-                      ? 'text-foreground font-bold'
-                      : 'text-muted-foreground',
-                    expanded ? 'pointer-events-auto opacity-100' : '',
-                  )}
-                >
-                  {navLink.title}
-                </span>
-              </Link>
-            </Fragment>
-          );
-        })}
-      </div>
-    </nav>
+                  {/* Collapsed state label (shows below icon when sidebar is collapsed) */}
+                  <span
+                    className={cn(
+                      `absolute left-7 -translate-x-1/2 text-xs`,
+                      active
+                        ? 'text-foreground top-[90%] font-bold'
+                        : 'text-muted-foreground top-[80%]',
+                      `transition-opacity duration-200 group-hover:pointer-events-none group-hover:opacity-0`,
+                      expanded ? 'pointer-events-none opacity-0' : '',
+                    )}
+                  >
+                    {navLink.title}
+                  </span>
+
+                  {/* Expanded label */}
+                  <span
+                    className={cn(
+                      `text-foreground pointer-events-none opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100`,
+                      active
+                        ? 'text-foreground font-bold'
+                        : 'text-muted-foreground',
+                      expanded ? 'pointer-events-auto opacity-100' : '',
+                    )}
+                  >
+                    {navLink.title}
+                  </span>
+                </Link>
+              </Fragment>
+            );
+          })}
+        </div>
+      </nav>
+    </div>
   );
 }
