@@ -12,7 +12,6 @@ import AddNewBusiness from '@/components/main/AddNewBusiness';
 import BusinessCard from '@/components/main/BusinessCard';
 import { useBusiness } from '@/providers/BusinessProvider';
 import PageTitle from '@/components/main/PageTitle';
-import { PlusIcon } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 
 export default function BusinessesPage() {

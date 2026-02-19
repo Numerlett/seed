@@ -5,17 +5,22 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: 'seed-numerlett.s3.ap-south-1.amazonaws.com',
+        hostname: 'lh3.googleusercontent.com',
       },
       {
         protocol: 'https',
-        hostname: 'lh3.googleusercontent.com',
+        hostname: `${process.env.NEXT_PUBLIC_AWS_S3_BUCKET_NAME}.s3.${process.env.NEXT_PUBLIC_AWS_REGION}.amazonaws.com`,
       },
-      // {
-      //   protocol: 'https',
-      //   hostname: `${process.env.NEXT_PUBLIC_AWS_S3_BUCKET_NAME}.s3.${process.env.NEXT_PUBLIC_AWS_REGION}.amazonaws.com`,
-      // },
     ],
+  },
+  async redirects() {
+    return [
+      {
+        source: '/parties',
+        destination: '/parties/customers',
+        permanent: true,
+      },
+    ];
   },
 };
 

@@ -25,21 +25,21 @@ export default async function MainLayout({
 }) {
   return (
     <AuthGuard>
-      <main className="bg-background text-foreground min-h-screen w-full">
+      <main className="bg-background text-foreground h-screen w-full overflow-hidden">
         <DataProvider>
           <BusinessProvider>
             <CategoriesProvider>
-              <div className="flex min-h-screen w-full">
+              <div className="flex h-full w-full">
                 {/* Sidebar: fixed width, always visible, no overlap */}
                 <div className="sticky top-0 z-30 h-screen shrink-0">
                   <Navbar />
                 </div>
                 {/* Main content: flex column, header sticky, content scrollable */}
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <div className="bg-background sticky top-0 z-20">
+                <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+                  <div className="bg-background z-20 shrink-0">
                     <Header />
                   </div>
-                  <div className="min-h-0 flex-1 overflow-y-auto">
+                  <div className="flex flex-1 flex-col overflow-y-auto">
                     {children}
                   </div>
                 </div>

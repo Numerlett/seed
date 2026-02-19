@@ -78,6 +78,7 @@ model Business {
   members    BusinessMembership[]
   products   Product[]
   categories Category[]
+  parties    Party[]
 
   @@unique([ownerId, name])
   @@map("businesses")
@@ -184,15 +185,17 @@ model Product {
 // -----------------------------------------------------
 
 model Party {
-  id          String   @id @default(cuid())
-  name        String
-  email       String?
-  phone       String?
-  partyType   PartyType
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  addresses     Address[]
+  id         String    @id @default(cuid())
+  name       String
+  email      String?
+  phone      String?
+  partyType  PartyType
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  businessId String
+  business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  addresses Address[]
 
   @@index([name])
   @@map("parties")
@@ -203,9 +206,6 @@ enum PartyType {
   SUPPLIER
   BOTH
 }
-
-
-
 
 model Address {
   id         String   @id @default(cuid())
@@ -219,7 +219,7 @@ model Address {
   updatedAt  DateTime @updatedAt
 
   partyId String?
-  party   Party?   @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  party   Party?  @relation(fields: [partyId], references: [id], onDelete: Cascade)
 
   @@map("addresses")
 }
