@@ -1,0 +1,114 @@
+// -----------------------------------------------------
+// SALES FLOW
+// SaleInvoice → SalesReturn
+// -----------------------------------------------------
+
+model SaleInvoice {
+  id             String         @id @default(cuid())
+  documentNumber String
+  status         DocumentStatus @default(DRAFT)
+  paymentStatus  PaymentStatus  @default(UNPAID)
+  invoiceDate    DateTime       @default(now())
+  dueDate        DateTime?
+  notes          String?
+  totalAmount    Decimal        @default(0)
+  taxAmount      Decimal        @default(0)
+  discountAmount Decimal        @default(0)
+  grandTotal     Decimal        @default(0)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  customerId String
+  customer   Party @relation("CustomerSaleInvoices", fields: [customerId], references: [id])
+
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  items        SaleInvoiceItem[]
+  salesReturns SalesReturn[]
+
+  @@unique([businessId, documentNumber])
+  @@index([businessId, invoiceDate])
+  @@index([customerId])
+  @@map("sale_invoices")
+}
+
+model SaleInvoiceItem {
+  id         String  @id @default(cuid())
+  quantity   Decimal
+  unitPrice  Decimal
+  taxRate    Decimal @default(0)
+  discount   Decimal @default(0)
+  totalPrice Decimal
+  costPrice  Decimal // snapshot for COGS calculation
+
+  saleInvoiceId String
+  saleInvoice   SaleInvoice @relation(fields: [saleInvoiceId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  shelfId String?
+  shelf   Shelf? @relation(fields: [shelfId], references: [id])
+
+  batchId String?
+  batch   ProductBatch? @relation(fields: [batchId], references: [id])
+
+  @@map("sale_invoice_items")
+}
+
+// Sales Returns (triggers SALES_RETURN_IN ledger)
+model SalesReturn {
+  id             String         @id @default(cuid())
+  documentNumber String
+  status         DocumentStatus @default(DRAFT)
+  returnDate     DateTime       @default(now())
+  reason         String?
+  notes          String?
+  totalAmount    Decimal        @default(0)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  customerId String
+  customer   Party @relation("CustomerSalesReturns", fields: [customerId], references: [id])
+
+  saleInvoiceId String?
+  saleInvoice   SaleInvoice? @relation(fields: [saleInvoiceId], references: [id])
+
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  items SalesReturnItem[]
+
+  @@unique([businessId, documentNumber])
+  @@index([businessId, returnDate])
+  @@index([customerId])
+  @@map("sales_returns")
+}
+
+model SalesReturnItem {
+  id         String  @id @default(cuid())
+  quantity   Decimal
+  unitPrice  Decimal
+  totalPrice Decimal
+
+  salesReturnId String
+  salesReturn   SalesReturn @relation(fields: [salesReturnId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  shelfId String?
+  shelf   Shelf? @relation(fields: [shelfId], references: [id])
+
+  batchId String?
+  batch   ProductBatch? @relation(fields: [batchId], references: [id])
+
+  @@map("sales_return_items")
+}

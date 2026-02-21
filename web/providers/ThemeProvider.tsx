@@ -1,9 +1,7 @@
 'use client';
 
 import useLocalState from '@/hooks/useLocalState';
-import { ThemeProvider as _NextThemeProvider } from 'next-themes';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const NextThemeProvider = _NextThemeProvider as any;
+import { ThemeProvider as NextThemeProvider } from 'next-themes';
 import { createContext, useContext, useEffect } from 'react';
 
 export interface ThemePresetContextType {

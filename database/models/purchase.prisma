@@ -1,0 +1,157 @@
+// -----------------------------------------------------
+// PURCHASE FLOW
+// PurchaseOrder → GoodsReceiptNote → PurchaseReturn
+// -----------------------------------------------------
+
+model PurchaseOrder {
+  id             String         @id @default(cuid())
+  documentNumber String
+  status         DocumentStatus @default(DRAFT)
+  paymentStatus  PaymentStatus  @default(UNPAID)
+  orderDate      DateTime       @default(now())
+  expectedDate   DateTime?
+  notes          String?
+  totalAmount    Decimal        @default(0)
+  taxAmount      Decimal        @default(0)
+  discountAmount Decimal        @default(0)
+  grandTotal     Decimal        @default(0)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  supplierId String
+  supplier   Party    @relation("SupplierPurchaseOrders", fields: [supplierId], references: [id])
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  items             PurchaseOrderItem[]
+  goodsReceiptNotes GoodsReceiptNote[]
+
+  @@unique([businessId, documentNumber])
+  @@index([businessId, orderDate])
+  @@index([supplierId])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id         String  @id @default(cuid())
+  quantity   Decimal
+  unitPrice  Decimal
+  taxRate    Decimal @default(0)
+  discount   Decimal @default(0)
+  totalPrice Decimal
+
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  @@map("purchase_order_items")
+}
+
+// GRN — Goods Receipt Note (triggers PURCHASE_IN ledger entries)
+model GoodsReceiptNote {
+  id             String         @id @default(cuid())
+  documentNumber String
+  status         DocumentStatus @default(DRAFT)
+  receivedDate   DateTime       @default(now())
+  notes          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  purchaseOrderId String?
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+
+  supplierId String
+  supplier   Party @relation("SupplierGRNs", fields: [supplierId], references: [id])
+
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  items           GRNItem[]
+  purchaseReturns PurchaseReturn[]
+
+  @@unique([businessId, documentNumber])
+  @@index([businessId, receivedDate])
+  @@index([supplierId])
+  @@map("goods_receipt_notes")
+}
+
+model GRNItem {
+  id               String  @id @default(cuid())
+  quantityOrdered  Decimal?
+  quantityReceived Decimal
+  unitPrice        Decimal
+  totalPrice       Decimal
+
+  grnId String
+  grn   GoodsReceiptNote @relation(fields: [grnId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  shelfId String?
+  shelf   Shelf? @relation(fields: [shelfId], references: [id])
+
+  batchId String?
+  batch   ProductBatch? @relation(fields: [batchId], references: [id])
+
+  @@map("grn_items")
+}
+
+// Purchase Returns (triggers PURCHASE_RETURN_OUT ledger)
+model PurchaseReturn {
+  id             String         @id @default(cuid())
+  documentNumber String
+  status         DocumentStatus @default(DRAFT)
+  returnDate     DateTime       @default(now())
+  reason         String?
+  notes          String?
+  totalAmount    Decimal        @default(0)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  supplierId String
+  supplier   Party @relation("SupplierPurchaseReturns", fields: [supplierId], references: [id])
+
+  grnId String?
+  grn   GoodsReceiptNote? @relation(fields: [grnId], references: [id])
+
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  items PurchaseReturnItem[]
+
+  @@unique([businessId, documentNumber])
+  @@index([businessId, returnDate])
+  @@index([supplierId])
+  @@map("purchase_returns")
+}
+
+model PurchaseReturnItem {
+  id         String  @id @default(cuid())
+  quantity   Decimal
+  unitPrice  Decimal
+  totalPrice Decimal
+
+  purchaseReturnId String
+  purchaseReturn   PurchaseReturn @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  shelfId String?
+  shelf   Shelf? @relation(fields: [shelfId], references: [id])
+
+  batchId String?
+  batch   ProductBatch? @relation(fields: [batchId], references: [id])
+
+  @@map("purchase_return_items")
+}

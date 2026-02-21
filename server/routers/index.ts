@@ -9,6 +9,13 @@ import { categoryRoutes } from './category';
 import { s3Routes } from './s3';
 import { partyRoutes } from './party';
 import { dashboardRoutes } from './dashboard';
+import { warehouseRoutes } from './warehouse';
+import { batchRoutes } from './batch';
+import { stockRoutes } from './stock';
+import { purchaseRoutes } from './purchase';
+import { salesRoutes } from './sales';
+import { returnsRoutes } from './returns';
+import { stockopsRoutes } from './stockops';
 
 export const appRouter = t.router({
   auth: authRoutes,
@@ -18,6 +25,13 @@ export const appRouter = t.router({
   category: categoryRoutes,
   party: partyRoutes,
   s3: s3Routes,
+  warehouse: warehouseRoutes,
+  batch: batchRoutes,
+  stock: stockRoutes,
+  purchase: purchaseRoutes,
+  sales: salesRoutes,
+  returns: returnsRoutes,
+  stockops: stockopsRoutes,
 });
 
 export const trpcExpress = createExpressMiddleware({

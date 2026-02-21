@@ -5,6 +5,7 @@ import { DataProvider } from '@/providers/DataProvider';
 import { BusinessProvider } from '@/providers/BusinessProvider';
 import AuthGuard from '@/auth/AuthGuard';
 import { CategoriesProvider } from '@/providers/CategoriesProvider';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 /**
  * Main Application Layout
@@ -29,21 +30,23 @@ export default async function MainLayout({
         <DataProvider>
           <BusinessProvider>
             <CategoriesProvider>
-              <div className="flex h-full w-full">
-                {/* Sidebar: fixed width, always visible, no overlap */}
-                <div className="sticky top-0 z-30 h-screen shrink-0">
-                  <Navbar />
-                </div>
-                {/* Main content: flex column, header sticky, content scrollable */}
-                <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
-                  <div className="bg-background z-20 shrink-0">
-                    <Header />
+              <TooltipProvider>
+                <div className="flex h-full w-full">
+                  {/* Sidebar: fixed width, always visible, no overlap */}
+                  <div className="sticky top-0 z-30 h-screen shrink-0">
+                    <Navbar />
                   </div>
-                  <div className="flex flex-1 flex-col overflow-y-auto">
-                    {children}
+                  {/* Main content: flex column, header sticky, content scrollable */}
+                  <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+                    <div className="bg-background z-20 shrink-0">
+                      <Header />
+                    </div>
+                    <div className="flex flex-1 flex-col overflow-y-auto">
+                      {children}
+                    </div>
                   </div>
                 </div>
-              </div>
+              </TooltipProvider>
             </CategoriesProvider>
           </BusinessProvider>
         </DataProvider>

@@ -32,7 +32,7 @@ export default function GoogleCallback() {
   useEffect(() => {
     if (!code) return;
     googleCallbackMutation.mutate({ code });
-  }, [code]);
+  }, [code, googleCallbackMutation]);
 
   if (!code) {
     return (

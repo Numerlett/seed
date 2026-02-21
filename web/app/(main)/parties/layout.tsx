@@ -18,8 +18,6 @@ export default function PartiesLayout({
   const isCustomers = type === 'customers';
   const isSuppliers = type === 'suppliers';
 
-  if (!isCustomers && !isSuppliers) return notFound();
-
   const title = useMemo(() => {
     if (isCustomers) return 'Parties: Customers';
     if (isSuppliers) return 'Parties: Suppliers';
@@ -33,6 +31,8 @@ export default function PartiesLayout({
       router.push('/parties/customers');
     }
   };
+
+  if (!isCustomers && !isSuppliers) return notFound();
 
   return (
     <>

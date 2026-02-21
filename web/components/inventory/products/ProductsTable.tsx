@@ -47,6 +47,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import Image from 'next/image';
 import { useSearchParams, useRouter } from 'next/navigation';
+import type { ProductWithCategory } from '@/types/inventory';
 
 type SortOrder = 'asc' | 'desc';
 type OrderBy = 'createdAt' | 'name' | 'currentStockLevel' | 'sellingPrice';

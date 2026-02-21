@@ -1,0 +1,152 @@
+// -----------------------------------------------------
+// STOCK OPERATIONS
+// Adjustments, Transfers, Damage & Expiry Write-offs
+// -----------------------------------------------------
+
+enum DamageType {
+  DAMAGED
+  EXPIRED
+  LOST
+  OTHER
+}
+
+// Stock Adjustments (triggers ADJUSTMENT_IN / ADJUSTMENT_OUT ledger)
+model StockAdjustment {
+  id             String         @id @default(cuid())
+  documentNumber String
+  status         DocumentStatus @default(DRAFT)
+  adjustmentDate DateTime       @default(now())
+  reason         String
+  notes          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  items StockAdjustmentItem[]
+
+  @@unique([businessId, documentNumber])
+  @@index([businessId, adjustmentDate])
+  @@map("stock_adjustments")
+}
+
+model StockAdjustmentItem {
+  id             String  @id @default(cuid())
+  systemQuantity Decimal
+  actualQuantity Decimal
+  adjustQuantity Decimal // actualQuantity − systemQuantity (can be negative)
+  unitCost       Decimal
+
+  stockAdjustmentId String
+  stockAdjustment   StockAdjustment @relation(fields: [stockAdjustmentId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  shelfId String?
+  shelf   Shelf? @relation(fields: [shelfId], references: [id])
+
+  batchId String?
+  batch   ProductBatch? @relation(fields: [batchId], references: [id])
+
+  @@map("stock_adjustment_items")
+}
+
+// Stock Transfers (triggers TRANSFER_OUT + TRANSFER_IN pair)
+model StockTransfer {
+  id             String         @id @default(cuid())
+  documentNumber String
+  status         DocumentStatus @default(DRAFT)
+  transferDate   DateTime       @default(now())
+  notes          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  sourceWarehouseId String
+  sourceWarehouse   Warehouse @relation("TransferSource", fields: [sourceWarehouseId], references: [id])
+
+  sourceShelfId String?
+  sourceShelf   Shelf? @relation("TransferSourceShelf", fields: [sourceShelfId], references: [id])
+
+  destWarehouseId String
+  destWarehouse   Warehouse @relation("TransferDest", fields: [destWarehouseId], references: [id])
+
+  destShelfId String?
+  destShelf   Shelf? @relation("TransferDestShelf", fields: [destShelfId], references: [id])
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  items StockTransferItem[]
+
+  @@unique([businessId, documentNumber])
+  @@index([businessId, transferDate])
+  @@map("stock_transfers")
+}
+
+model StockTransferItem {
+  id       String  @id @default(cuid())
+  quantity Decimal
+  unitCost Decimal
+
+  stockTransferId String
+  stockTransfer   StockTransfer @relation(fields: [stockTransferId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  batchId String?
+  batch   ProductBatch? @relation(fields: [batchId], references: [id])
+
+  @@map("stock_transfer_items")
+}
+
+// Damage & Expiry Write-offs (triggers DAMAGE_OUT / EXPIRED_OUT ledger)
+model DamageReport {
+  id             String         @id @default(cuid())
+  documentNumber String
+  status         DocumentStatus @default(DRAFT)
+  reportDate     DateTime       @default(now())
+  reason         String
+  notes          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  items DamageReportItem[]
+
+  @@unique([businessId, documentNumber])
+  @@index([businessId, reportDate])
+  @@map("damage_reports")
+}
+
+model DamageReportItem {
+  id         String     @id @default(cuid())
+  quantity   Decimal
+  unitCost   Decimal
+  totalLoss  Decimal
+  damageType DamageType
+
+  damageReportId String
+  damageReport   DamageReport @relation(fields: [damageReportId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  shelfId String?
+  shelf   Shelf? @relation(fields: [shelfId], references: [id])
+
+  batchId String?
+  batch   ProductBatch? @relation(fields: [batchId], references: [id])
+
+  @@map("damage_report_items")
+}

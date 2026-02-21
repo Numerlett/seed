@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
 import { Pencil, Trash2 } from 'lucide-react';
+import type { ProductWithCategory } from '@/types/inventory';
 
 interface ProductDetailSheetProps {
   product: ProductWithCategory | null;
@@ -244,7 +245,7 @@ export default function ProductDetailSheet({
               <div>
                 <h3 className="mb-3 text-lg font-semibold">Attachments</h3>
                 <div className="space-y-2">
-                  {product.attachments.map((attachment, index) => (
+                  {product.attachments.map((attachment: any, index: number) => (
                     <a
                       key={index}
                       href={attachment}

@@ -1,0 +1,99 @@
+// -----------------------------------------------------
+// PRODUCT & CATEGORY MANAGEMENT
+// -----------------------------------------------------
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String
+  businessId  String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Self-relation for subcategories
+  parentId String?
+  parent   Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryHierarchy")
+
+  business Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@unique([businessId, name])
+  @@index([name])
+  @@map("categories")
+}
+
+model Product {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+
+  // Identification
+  sku     String  @unique
+  barcode String?
+
+  // Product Specifications
+  brand      String?
+  model      String?
+  color      String?
+  size       String?
+  weight     Decimal?
+  dimensions String?
+
+  // Media
+  image       String?
+  attachments String[]
+
+  // Units
+  unit           String   @default("pcs")
+  secondaryUnit  String?
+  unitConvertion Decimal?
+
+  // Inventory & Pricing
+  // NOTE: currentStockLevel is a cached aggregate — updated only via ledger engine, never directly
+  currentStockLevel Decimal  @default(0)
+  minStockLevel     Decimal?
+  maxStockLevel     Decimal?
+  reorderLevel      Decimal?
+  costPrice         Decimal
+  sellingPrice      Decimal
+  mrp               Decimal?
+  taxRate           Decimal
+  discountRate      Decimal
+
+  // Batch & Expiry Tracking Flags
+  trackBatch    Boolean  @default(false)
+  trackExpiry   Boolean  @default(false)
+
+  // Flags & Timestamps  
+  isActive      Boolean  @default(true)
+  isService     Boolean  @default(false)
+  allowNegative Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id])
+
+  batches        ProductBatch[]
+  ledgerEntries  InventoryLedger[]
+  stockSummaries InventoryStock[]
+
+  // Transaction line items
+  purchaseOrderItems   PurchaseOrderItem[]
+  grnItems             GRNItem[]
+  saleInvoiceItems     SaleInvoiceItem[]
+  purchaseReturnItems  PurchaseReturnItem[]
+  salesReturnItems     SalesReturnItem[]
+  stockAdjustmentItems StockAdjustmentItem[]
+  stockTransferItems   StockTransferItem[]
+  damageReportItems    DamageReportItem[]
+
+  @@index([businessId, name])
+  @@map("products")
+}

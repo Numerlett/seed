@@ -2,12 +2,22 @@
 
 import { usePathname } from 'next/navigation';
 import React, { Fragment } from 'react';
-import { BarChart3, Package, Settings, Users } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  BarChart3,
+  Layers,
+  Package,
+  Receipt,
+  RotateCcw,
+  Settings,
+  ShoppingCart,
+  Users,
+  Warehouse,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { Separator } from '@/components/ui/separator';
 import { LuLayoutDashboard } from 'react-icons/lu';
-import { PiInvoiceDuotone } from 'react-icons/pi';
 import { useData } from '@/providers/DataProvider';
 import BusinessSwitcher from './BuisnessSwitcher';
 
@@ -44,14 +54,39 @@ export default function Navbar() {
       icon: Package,
     },
     {
-      title: 'Billing',
-      href: '/bills',
-      icon: PiInvoiceDuotone,
+      title: 'Warehouses',
+      href: '/warehouses',
+      icon: Warehouse,
     },
     {
-      title: 'Parties', // Customers & Suppliers
+      title: 'Purchases',
+      href: '/purchases',
+      icon: ShoppingCart,
+    },
+    {
+      title: 'Sales',
+      href: '/sales',
+      icon: Receipt,
+    },
+    {
+      title: 'Parties',
       href: '/parties',
       icon: Users,
+    },
+    {
+      title: 'Returns',
+      href: '/returns',
+      icon: RotateCcw,
+    },
+    {
+      title: 'Stock Ops',
+      href: '/stock-ops',
+      icon: ArrowLeftRight,
+    },
+    {
+      title: 'Batches',
+      href: '/batches',
+      icon: Layers,
     },
     {
       title: 'Analytics',

@@ -1,0 +1,90 @@
+// -----------------------------------------------------
+// WAREHOUSE, SHELF & BATCH MANAGEMENT
+// -----------------------------------------------------
+
+model Warehouse {
+  id         String   @id @default(cuid())
+  name       String
+  location   String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  shelves         Shelf[]
+  ledgerEntries   InventoryLedger[]
+  stockSummaries  InventoryStock[]
+
+  // Transaction documents
+  goodsReceiptNotes GoodsReceiptNote[]
+  saleInvoices      SaleInvoice[]
+  purchaseReturns   PurchaseReturn[]
+  salesReturns      SalesReturn[]
+  stockAdjustments  StockAdjustment[]
+  transfersOut      StockTransfer[]    @relation("TransferSource")
+  transfersIn       StockTransfer[]    @relation("TransferDest")
+  damageReports     DamageReport[]
+
+  @@unique([businessId, name])
+  @@map("warehouses")
+}
+
+model Shelf {
+  id          String   @id @default(cuid())
+  shelfCode   String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  ledgerEntries  InventoryLedger[]
+  stockSummaries InventoryStock[]
+
+  // Transaction line items
+  grnItems             GRNItem[]
+  saleInvoiceItems     SaleInvoiceItem[]
+  purchaseReturnItems  PurchaseReturnItem[]
+  salesReturnItems     SalesReturnItem[]
+  stockAdjustmentItems StockAdjustmentItem[]
+  transfersOut         StockTransfer[]    @relation("TransferSourceShelf")
+  transfersIn          StockTransfer[]    @relation("TransferDestShelf")
+  damageReportItems    DamageReportItem[]
+
+  @@unique([warehouseId, shelfCode])
+  @@map("shelves")
+}
+
+model ProductBatch {
+  id                String    @id @default(cuid())
+  batchNumber       String
+  expiryDate        DateTime?
+  manufacturingDate DateTime?
+  purchasePrice     Decimal
+  isExpired         Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  ledgerEntries  InventoryLedger[]
+  stockSummaries InventoryStock[]
+
+  // Transaction line items
+  grnItems             GRNItem[]
+  saleInvoiceItems     SaleInvoiceItem[]
+  purchaseReturnItems  PurchaseReturnItem[]
+  salesReturnItems     SalesReturnItem[]
+  stockAdjustmentItems StockAdjustmentItem[]
+  stockTransferItems   StockTransferItem[]
+  damageReportItems    DamageReportItem[]
+
+  @@unique([productId, batchNumber])
+  @@index([expiryDate])
+  @@map("product_batches")
+}

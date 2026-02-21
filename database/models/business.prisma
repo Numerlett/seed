@@ -1,0 +1,66 @@
+// -----------------------------------------------------
+// BUSINESS MANAGEMENT
+// -----------------------------------------------------
+
+enum BusinessMembershipType {
+  OWNER
+  STAFF
+}
+
+enum CostingMethod {
+  FIFO
+  WEIGHTED_AVERAGE
+}
+
+model Business {
+  id          String  @id @default(cuid())
+  name        String
+  ownerId     String
+  description String?
+  email       String?
+  phone       String?
+  logoImage   String?
+  website     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  costingMethod CostingMethod @default(WEIGHTED_AVERAGE)
+
+  owner      User                 @relation("BusinessOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members    BusinessMembership[]
+  products   Product[]
+  categories Category[]
+  parties    Party[]
+  warehouses Warehouse[]
+  inventoryLedger InventoryLedger[]
+
+  // Transaction documents
+  purchaseOrders    PurchaseOrder[]
+  goodsReceiptNotes GoodsReceiptNote[]
+  saleInvoices      SaleInvoice[]
+  purchaseReturns   PurchaseReturn[]
+  salesReturns      SalesReturn[]
+  stockAdjustments  StockAdjustment[]
+  stockTransfers    StockTransfer[]
+  damageReports     DamageReport[]
+
+  @@unique([ownerId, name])
+  @@map("businesses")
+}
+
+model BusinessMembership {
+  id         String                 @id @default(cuid())
+  userId     String
+  businessId String
+  title      String?
+  role       BusinessMembershipType @default(STAFF)
+  createdAt  DateTime               @default(now())
+  updatedAt  DateTime               @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, businessId])
+  @@map("business_memberships")
+}
