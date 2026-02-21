@@ -4,6 +4,20 @@
   "description": "",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./generated/client": {
+      "types": "./dist/generated/client.d.ts",
+      "default": "./dist/generated/client.js"
+    },
+    "./generated/models": {
+      "types": "./dist/generated/models.d.ts",
+      "default": "./dist/generated/models.js"
+    }
+  },
   "scripts": {
     "prebuild": "prisma generate",
     "build": "tsc",
