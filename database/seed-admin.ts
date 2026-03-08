@@ -12,9 +12,15 @@
  *   npx tsx seed-admin.ts admin@example.com --super   # Creates a super admin
  */
 
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import { PrismaClient } from './generated/client';
 import { PrismaPg } from '@prisma/adapter-pg';
+
+// Load env from the same sources as prisma.config.ts
+dotenv.config();
+dotenv.config({ path: '../.env' });
+dotenv.config({ path: '../client/.env' });
+dotenv.config({ path: '../server/.env' });
 
 async function main() {
   const email = process.argv[2];
@@ -29,9 +35,11 @@ async function main() {
     process.exit(1);
   }
 
-  const adapter = new PrismaPg({
-    connectionString: process.env.DATABASE_URL,
-  });
+  const connectionString =
+    process.env.DATABASE_URL ||
+    'postgresql://postgres:1234567890@localhost:5432/seed';
+
+  const adapter = new PrismaPg({ connectionString });
 
   const prisma = new PrismaClient({ adapter });
 
