@@ -135,6 +135,50 @@ if (req.query.state !== req.session.oauthState) {
 
 ---
 
+## Session Management
+
+### Device-Aware Sessions (Instagram-Style)
+
+Each login creates a `RefreshToken` record enriched with structured device metadata, enabling users to review exactly where they are logged in.
+
+**Stored per session:**
+
+| Field          | Description                                      |
+| -------------- | ------------------------------------------------ |
+| `deviceName`   | Human-readable label, e.g. "Chrome 120 on macOS" |
+| `deviceType`   | `desktop`, `mobile`, or `tablet`                 |
+| `browser`      | Parsed browser name + version                    |
+| `os`           | Parsed operating system                          |
+| `ipAddress`    | Client IP (first entry from `x-forwarded-for`)   |
+| `location`     | Optional geo-location string                     |
+| `loginMethod`  | `email` or `google`                              |
+| `lastActiveAt` | Updated on every token refresh                   |
+
+### Current Session Identification
+
+When fetching active sessions, the API compares the caller's refresh token against the database to return a `currentSessionId`, allowing the UI to label the entry as **"This device"**.
+
+### Session Revocation
+
+| Action                       | Endpoint                   | Behavior                                        |
+| ---------------------------- | -------------------------- | ----------------------------------------------- |
+| Revoke single session        | `auth.revokeSessionById`   | Ends a specific device's session                |
+| Log out of all other devices | `auth.revokeOtherSessions` | Keeps the current session, revokes all others   |
+| Log out everywhere           | `auth.revokeAllSessions`   | Revokes every session including the current one |
+
+### Last-Active Tracking
+
+Each time a refresh token is used to obtain a new access token, the session's `lastActiveAt` timestamp is updated. The UI renders this as a relative time string ("Active now", "2 hours ago", "3 days ago") to help users spot stale or suspicious sessions.
+
+### Token Cleanup
+
+A helper (`cleanupExpiredTokens`) can be invoked via `auth.cleanupTokens` or scheduled as a cron job. It removes:
+
+- Tokens past their `expiresAt` date
+- Revoked tokens older than 7 days
+
+---
+
 ## Authorization
 
 ### Role-Based Access Control

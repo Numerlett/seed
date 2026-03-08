@@ -36,7 +36,7 @@ database/
 **Auth & Users:**
 
 - **User**: User accounts and profiles
-- **RefreshToken**: JWT refresh tokens for session management
+- **RefreshToken**: JWT refresh tokens for session management with device metadata (browser, OS, device type, IP, login method, last active tracking)
 - **otp**: One-time passwords for authentication
 
 **Business & Commerce:**

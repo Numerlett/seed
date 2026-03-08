@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
-import React, { Fragment } from 'react';
+import React, { Fragment, useState } from 'react';
 import {
   ArrowLeftRight,
   BarChart3,
@@ -20,6 +20,7 @@ import { Separator } from '@/components/ui/separator';
 import { LuLayoutDashboard } from 'react-icons/lu';
 import { useData } from '@/providers/DataProvider';
 import BusinessSwitcher from './BuisnessSwitcher';
+import { AnimatePresence, motion } from 'framer-motion';
 
 /**
  * Main Navigation Sidebar Component
@@ -29,7 +30,8 @@ import BusinessSwitcher from './BuisnessSwitcher';
  * - Business switcher integration
  * - Active route highlighting
  * - Responsive design with icon-only collapsed state
- * - Smooth animations and transitions
+ * - Conditionally renders collapsed (column) or expanded (row) nav labels
+ * - Smooth framer-motion animations between states
  */
 
 interface NavItem {
@@ -40,6 +42,7 @@ interface NavItem {
 
 export default function Navbar() {
   const pathname = usePathname();
+  const [hovered, setHovered] = useState(false);
 
   // Main navigation items for the retail management system
   const navItems: NavItem[] = [
@@ -102,6 +105,9 @@ export default function Navbar() {
 
   const { expanded } = useData();
 
+  /** Whether the sidebar is visually open (either pinned or hovered) */
+  const isOpen = expanded || hovered;
+
   return (
     <div
       className={cn(
@@ -110,66 +116,86 @@ export default function Navbar() {
       )}
     >
       <nav
+        onMouseEnter={() => !expanded && setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
         className={cn(
-          'group navbar bg-sidebar flex h-full max-h-screen flex-col overflow-hidden border-r p-2.5 backdrop-blur-lg transition-all duration-300 ease-in-out',
+          'navbar bg-sidebar flex h-full max-h-screen flex-col overflow-hidden border-r p-2.5 backdrop-blur-lg transition-all duration-300 ease-in-out',
           expanded
             ? 'w-60'
             : 'absolute top-0 left-0 z-10 w-19 hover:w-60 hover:shadow-xl',
         )}
       >
         {/* Business Switcher at the top */}
-        <BusinessSwitcher expanded={expanded} />
+        <BusinessSwitcher isOpen={isOpen} />
 
         <Separator className="my-2" />
 
-        {/* Main navigation items */}
-        <div className="flex min-w-max flex-1 list-none flex-col gap-1 space-y-2 p-0 transition-all duration-200">
+        {/* Main navigation items - scrollable to prevent bottom overflow */}
+        <div className="flex flex-1 list-none flex-col gap-0.5 overflow-y-auto p-0">
           {navItems.map((navLink, index) => {
             const active = pathname.startsWith(navLink.href);
             return (
               <Fragment key={index}>
                 {/* Separator before settings (last item) */}
                 {index === navItems.length - 1 && (
-                  <Separator className="mt-3" />
+                  <Separator className="mt-1" />
                 )}
                 <Link
                   href={navLink.href}
                   className={cn(
-                    'hover:bg-muted relative flex cursor-pointer flex-row items-center rounded-xl',
+                    'hover:bg-muted flex cursor-pointer items-center rounded-lg',
+                    isOpen ? 'flex-row' : 'flex-col py-0.5',
                   )}
                   prefetch={true}
                 >
                   {/* Navigation icon */}
                   <navLink.icon
-                    className={`${active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'} peer m-2.5 size-8 rounded-lg p-1.5`}
+                    className={cn(
+                      'shrink-0 rounded-md',
+                      active
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-muted-foreground',
+                      isOpen ? 'm-1.5 size-7 p-1' : 'm-1 size-6 p-1',
+                    )}
                   />
 
-                  {/* Collapsed state label (shows below icon when sidebar is collapsed) */}
-                  <span
-                    className={cn(
-                      `absolute left-7 -translate-x-1/2 text-xs`,
-                      active
-                        ? 'text-foreground top-[90%] font-bold'
-                        : 'text-muted-foreground top-[80%]',
-                      `transition-opacity duration-200 group-hover:pointer-events-none group-hover:opacity-0`,
-                      expanded ? 'pointer-events-none opacity-0' : '',
+                  <AnimatePresence mode="wait" initial={false}>
+                    {isOpen ? (
+                      /* Expanded label — displayed inline next to icon */
+                      <motion.span
+                        key="expanded"
+                        initial={{ opacity: 0, x: -4 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -4 }}
+                        transition={{ duration: 0.15 }}
+                        className={cn(
+                          'text-sm whitespace-nowrap',
+                          active
+                            ? 'text-foreground font-bold'
+                            : 'text-muted-foreground',
+                        )}
+                      >
+                        {navLink.title}
+                      </motion.span>
+                    ) : (
+                      /* Collapsed label — centered below icon */
+                      <motion.span
+                        key="collapsed"
+                        initial={{ opacity: 0, y: -2 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -2 }}
+                        transition={{ duration: 0.15 }}
+                        className={cn(
+                          'max-w-full truncate text-center text-[10px] leading-tight',
+                          active
+                            ? 'text-foreground font-bold'
+                            : 'text-muted-foreground',
+                        )}
+                      >
+                        {navLink.title}
+                      </motion.span>
                     )}
-                  >
-                    {navLink.title}
-                  </span>
-
-                  {/* Expanded label */}
-                  <span
-                    className={cn(
-                      `text-foreground pointer-events-none opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100`,
-                      active
-                        ? 'text-foreground font-bold'
-                        : 'text-muted-foreground',
-                      expanded ? 'pointer-events-auto opacity-100' : '',
-                    )}
-                  >
-                    {navLink.title}
-                  </span>
+                  </AnimatePresence>
                 </Link>
               </Fragment>
             );

@@ -275,31 +275,43 @@ logout.mutate();
 
 ---
 
-### `auth.getSessions`
+### `auth.getActiveSessions`
 
-Get all active sessions for the current user.
+Get all active sessions for the current user with enriched device metadata and current session identification.
 
 **Type**: Query (Protected)  
 **Input**: None  
 **Output**:
 
 ```typescript
-Array<{
-  id: string;
-  deviceInfo: string;
-  createdAt: Date;
-  expiresAt: Date;
-  isCurrentSession: boolean;
-}>;
+{
+  sessions: Array<{
+    id: string;
+    clientInfo: unknown;
+    createdAt: Date;
+    expiresAt: Date;
+    lastActiveAt: Date;
+    deviceName: string | null;
+    deviceType: string | null; // 'desktop' | 'mobile' | 'tablet'
+    browser: string | null;
+    os: string | null;
+    location: string | null;
+    ipAddress: string | null;
+    loginMethod: string | null; // 'email' | 'google'
+  }>;
+  currentSessionId: string | null;
+}
 ```
 
 ```typescript
-const { data: sessions } = api.auth.getSessions.useQuery();
+const { data } = api.auth.getActiveSessions.useQuery();
+// data.sessions — array of active sessions
+// data.currentSessionId — ID of the session for the current device
 ```
 
 ---
 
-### `auth.revokeSession`
+### `auth.revokeSessionById`
 
 Revoke a specific session/refresh token.
 
@@ -316,12 +328,13 @@ Revoke a specific session/refresh token.
 
 ```typescript
 {
+  message: string;
   success: boolean;
 }
 ```
 
 ```typescript
-const revokeSession = api.auth.revokeSession.useMutation();
+const revokeSession = api.auth.revokeSessionById.useMutation();
 
 revokeSession.mutate({ sessionId: 'token_id' });
 ```
@@ -330,7 +343,7 @@ revokeSession.mutate({ sessionId: 'token_id' });
 
 ### `auth.revokeAllSessions`
 
-Revoke all sessions except current one.
+Revoke all sessions including the current one. Clears cookies and forces re-authentication everywhere.
 
 **Type**: Mutation (Protected)  
 **Input**: None  
@@ -338,8 +351,9 @@ Revoke all sessions except current one.
 
 ```typescript
 {
+  message: string;
   success: boolean;
-  revokedCount: number;
+  count: number;
 }
 ```
 
@@ -347,6 +361,30 @@ Revoke all sessions except current one.
 const revokeAll = api.auth.revokeAllSessions.useMutation();
 
 revokeAll.mutate();
+```
+
+---
+
+### `auth.revokeOtherSessions`
+
+Revoke all sessions except the current one (Instagram-style "Log out of all other devices"). The user stays logged in on the current device.
+
+**Type**: Mutation (Protected)  
+**Input**: None  
+**Output**:
+
+```typescript
+{
+  message: string;
+  success: boolean;
+  count: number;
+}
+```
+
+```typescript
+const revokeOthers = api.auth.revokeOtherSessions.useMutation();
+
+revokeOthers.mutate();
 ```
 
 ---

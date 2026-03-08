@@ -15,8 +15,15 @@ import { Button } from '@/components/ui/button';
 import AddNewBusiness from './AddNewBusiness';
 import { useBusiness } from '@/providers/BusinessProvider';
 import { Badge } from '../ui/badge';
+import { AnimatePresence, motion } from 'framer-motion';
 
-export default function BusinessSwitcher({ expanded }: { expanded: boolean }) {
+/**
+ * Business Switcher Component
+ *
+ * Displays the current business with an avatar and dropdown to switch between businesses.
+ * Adapts layout based on `isOpen` — shows name + chevron when open, avatar-only when collapsed.
+ */
+export default function BusinessSwitcher({ isOpen }: { isOpen: boolean }) {
   const {
     businessMembershipId,
     switchBusinessMembershipId,
@@ -29,11 +36,11 @@ export default function BusinessSwitcher({ expanded }: { expanded: boolean }) {
       <DropdownMenuTrigger asChild>
         <div
           className={cn(
-            'group-hover:bg-muted relative flex cursor-pointer flex-row items-center gap-4 rounded-xl p-2',
-            expanded ? 'bg-muted' : '',
+            'relative flex cursor-pointer items-center rounded-lg p-1.5 transition-colors',
+            isOpen ? 'bg-muted flex-row gap-3' : 'flex-col justify-center',
           )}
         >
-          <Avatar className="size-10">
+          <Avatar className={cn(isOpen ? 'size-9' : 'size-8')}>
             <AvatarImage
               src={currentBusinessMembership?.business.logoImage || ''}
               alt={currentBusinessMembership?.business.name || ''}
@@ -47,16 +54,25 @@ export default function BusinessSwitcher({ expanded }: { expanded: boolean }) {
             </AvatarFallback>
           </Avatar>
 
-          <span
-            className={cn(
-              `text-foreground pointer-events-none w-max truncate opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100`,
-              expanded ? 'pointer-events-auto opacity-100' : '',
+          <AnimatePresence initial={false}>
+            {isOpen && (
+              /* Expanded: show business name and chevron inline */
+              <motion.div
+                key="open"
+                initial={{ opacity: 0, x: -4 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -4 }}
+                transition={{ duration: 0.15 }}
+                className="flex min-w-0 flex-1 items-center"
+              >
+                <span className="text-foreground min-w-0 flex-1 truncate text-sm font-medium">
+                  {currentBusinessMembership?.business.name ||
+                    'Select Business'}
+                </span>
+                <ChevronsUpDown className="ml-auto h-4 w-4 shrink-0 opacity-50" />
+              </motion.div>
             )}
-          >
-            {currentBusinessMembership?.business.name || 'Select Business'}
-          </span>
-
-          <ChevronsUpDown className="ml-auto h-4 w-4 shrink-0 opacity-50" />
+          </AnimatePresence>
         </div>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64">

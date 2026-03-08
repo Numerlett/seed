@@ -6,6 +6,7 @@ import { prisma } from '@seed/database';
 import type { UserModel } from '@seed/database/generated/models';
 import dotenv from 'dotenv';
 import { AccessTokenPayload, RefreshTokenPayload } from '../types/auth';
+import { parseUserAgent, extractIpAddress } from './deviceParser';
 
 dotenv.config();
 
@@ -87,11 +88,22 @@ export function getExpiryDate(timeString: string) {
   return new Date(Date.now() + milliseconds);
 }
 
+/**
+ * Generate new access + refresh token pair, store the refresh token in the
+ * database with enriched device metadata, and optionally set cookies.
+ *
+ * @param req - Express request (used for UA / IP extraction)
+ * @param res - Express response (used for setting cookies)
+ * @param user - The authenticated user record
+ * @param method - How to deliver tokens: 'cookie', 'return', or 'both'
+ * @param loginMethod - Authentication method used: 'email' | 'google'
+ */
 export const generateTokens = async (
   req: Request,
   res: Response,
   user: UserModel,
   method: 'cookie' | 'return' | 'both' = 'both',
+  loginMethod: 'email' | 'google' = 'email',
 ) => {
   const clientRefreshToken =
     req.cookies['refresh-token'] ||
@@ -175,12 +187,17 @@ export const generateTokens = async (
     },
   );
 
+  const rawUserAgent = req?.headers?.['user-agent'] ?? undefined;
+  const ipAddress = extractIpAddress(
+    req?.headers?.['x-forwarded-for'],
+    req?.socket?.remoteAddress,
+  );
+  const device = parseUserAgent(rawUserAgent);
+
   const clientInfo = {
-    userAgent: req?.headers?.['user-agent'] ?? 'N/A',
+    userAgent: rawUserAgent ?? 'N/A',
     host: req?.headers?.['host'] ?? 'N/A',
-    ip:
-      (req?.headers?.['x-forwarded-for'] || req?.socket?.remoteAddress) ??
-      'N/A',
+    ip: ipAddress,
   };
 
   await prisma.refreshToken.create({
@@ -189,6 +206,13 @@ export const generateTokens = async (
       userId: user.id,
       expiresAt: getExpiryDate(refreshTokenExpiry),
       clientInfo,
+      lastActiveAt: new Date(),
+      deviceName: device.deviceName,
+      deviceType: device.deviceType,
+      browser: device.browser,
+      os: device.os,
+      ipAddress,
+      loginMethod,
     },
   });
 

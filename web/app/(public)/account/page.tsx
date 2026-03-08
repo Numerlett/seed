@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import {
   LoaderCircleIcon,
   LogOutIcon,
+  MonitorIcon,
   ShieldIcon,
   UserIcon,
 } from 'lucide-react';
@@ -26,6 +27,8 @@ export default function AccountPage() {
   const router = useRouter();
   const [name, setName] = useState(user?.name || '');
   const [isEditing, setIsEditing] = useState(false);
+
+  const { data: sessionsData } = clientTrpc.auth.getActiveSessions.useQuery();
 
   const updateUserMutation = clientTrpc.auth.updateUser.useMutation({
     onSuccess: async () => {
@@ -172,7 +175,7 @@ export default function AccountPage() {
         </CardContent>
       </Card>
 
-      {/* Security Card */}
+      {/* Security & Sessions Card */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -182,14 +185,21 @@ export default function AccountPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
-            <div>
-              <p className="font-medium">Active Sessions</p>
-              <p className="text-muted-foreground text-sm">
-                Manage your active sessions across devices
-              </p>
+            <div className="flex items-center gap-3">
+              <div className="bg-muted rounded-lg p-2">
+                <MonitorIcon className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="font-medium">Login Activity</p>
+                <p className="text-muted-foreground text-sm">
+                  {sessionsData?.sessions
+                    ? `${sessionsData.sessions.length} active ${sessionsData.sessions.length === 1 ? 'session' : 'sessions'}`
+                    : 'Manage devices where you\u2019re logged in'}
+                </p>
+              </div>
             </div>
             <Button asChild>
-              <Link href="/account/sessions">Manage Sessions</Link>
+              <Link href="/account/sessions">View All</Link>
             </Button>
           </div>
 

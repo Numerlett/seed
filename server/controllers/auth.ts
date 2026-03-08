@@ -18,9 +18,12 @@ import jwt from 'jsonwebtoken';
 import { protectedProcedure, publicProcedure } from '../trpc/procedures';
 import {
   cleanupExpiredTokens,
+  findSessionByToken,
   getUserActiveSessions,
+  revokeOtherUserTokens,
   revokeSession,
   revokeAllUserTokens,
+  touchSession,
 } from '../helpers/tokenManagement';
 import { RefreshTokenPayload } from '../types/auth';
 import otpEmailTemplate from '../helpers/email-templates/otpEmailTemplate';
@@ -285,6 +288,7 @@ export const emailVerify = publicProcedure
         res,
         user!,
         'cookie',
+        'email',
       );
 
       return {
@@ -362,7 +366,7 @@ export const googleAuthCallback = publicProcedure
       }
 
       // 🔐 sets httpOnly cookies
-      await generateTokens(req, res, user, 'cookie');
+      await generateTokens(req, res, user, 'cookie', 'google');
 
       return { success: true };
     } catch (error: unknown) {
@@ -445,6 +449,7 @@ export const getNewAccessToken = publicProcedure
       const dbRefreshToken = await prisma.refreshToken.findUnique({
         where: { userId: userId, token: clientRefreshToken },
         include: { user: true },
+        // loginMethod is included automatically via include
       });
 
       if (!dbRefreshToken) {
@@ -479,12 +484,25 @@ export const getNewAccessToken = publicProcedure
         });
       }
 
+      // Touch session to update lastActiveAt before rotating
+      await touchSession(dbRefreshToken.id);
+
+      // Preserve loginMethod from the existing session
+      const loginMethod =
+        (dbRefreshToken.loginMethod as 'email' | 'google') || 'email';
+
       const {
         accessToken: newAccessToken,
         refreshToken: newRefreshToken,
         accessTokenCookieOptions,
         refreshTokenCookieOptions,
-      } = await generateTokens(req, res, dbRefreshToken.user, method);
+      } = await generateTokens(
+        req,
+        res,
+        dbRefreshToken.user,
+        method,
+        loginMethod,
+      );
 
       return {
         accessToken: newAccessToken,
@@ -500,11 +518,27 @@ export const getNewAccessToken = publicProcedure
   });
 
 // Session management endpoints
+
+/**
+ * Get all active sessions for the current user.
+ * Returns session list with a `currentSessionId` so the client can
+ * highlight the session currently in use.
+ */
 export const getActiveSessions = protectedProcedure.query(
-  async ({ ctx: { userId } }) => {
+  async ({ ctx: { userId, req } }) => {
     try {
       const sessions = await getUserActiveSessions(userId);
-      return sessions;
+
+      // Identify which session belongs to the current request
+      const clientRefreshToken =
+        req.cookies?.['refresh-token'] || req.headers['refresh-token'];
+
+      let currentSessionId: string | null = null;
+      if (clientRefreshToken && typeof clientRefreshToken === 'string') {
+        currentSessionId = await findSessionByToken(clientRefreshToken, userId);
+      }
+
+      return { sessions, currentSessionId };
     } catch (error: unknown) {
       handleControllerError(error, {
         operation: 'fetch active sessions',
@@ -538,6 +572,10 @@ export const revokeSessionById = protectedProcedure
     }
   });
 
+/**
+ * Revoke ALL sessions (including the current one).
+ * Clears cookies and forces re-authentication on every device.
+ */
 export const revokeAllSessions = protectedProcedure.mutation(
   async ({ ctx: { userId, res } }) => {
     try {
@@ -556,6 +594,44 @@ export const revokeAllSessions = protectedProcedure.mutation(
     } catch (error: unknown) {
       handleControllerError(error, {
         operation: 'revoke all sessions',
+        userId,
+      });
+    }
+  },
+);
+
+/**
+ * Revoke all sessions except the one currently in use (Instagram-style).
+ * The user stays logged in on this device while being logged out everywhere else.
+ */
+export const revokeOtherSessions = protectedProcedure.mutation(
+  async ({ ctx: { userId, req } }) => {
+    try {
+      const clientRefreshToken =
+        req.cookies?.['refresh-token'] || req.headers['refresh-token'];
+
+      let currentSessionId: string | null = null;
+      if (clientRefreshToken && typeof clientRefreshToken === 'string') {
+        currentSessionId = await findSessionByToken(clientRefreshToken, userId);
+      }
+
+      if (!currentSessionId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Could not identify current session',
+        });
+      }
+
+      const count = await revokeOtherUserTokens(userId, currentSessionId);
+
+      return {
+        message: `Logged out of ${count} other ${count === 1 ? 'session' : 'sessions'}`,
+        success: true,
+        count,
+      };
+    } catch (error: unknown) {
+      handleControllerError(error, {
+        operation: 'revoke other sessions',
         userId,
       });
     }
