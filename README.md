@@ -30,34 +30,84 @@ seed/
 │   └── types.ts           # Shared API types
 │
 ├── database/              # Database layer with Prisma
-│   ├── prisma/
-│   │   ├── schema.prisma  # Database schema
-│   │   └── migrations/    # Migration history
+│   ├── schema.prisma      # Base schema (generator + datasource)
+│   ├── prisma.config.ts   # Prisma config (env loading)
+│   ├── models/            # Multi-file Prisma schema
+│   │   ├── user.prisma    # User, Auth, Admin, AuditLog, SystemSetting
+│   │   ├── business.prisma # Business model
+│   │   ├── product.prisma # Product model
+│   │   ├── inventory.prisma # Inventory models
+│   │   ├── sales.prisma   # Sales models
+│   │   ├── purchase.prisma # Purchase models
+│   │   ├── warehouse.prisma # Warehouse model
+│   │   ├── party.prisma   # Party model
+│   │   └── stockops.prisma # Stock operations
+│   ├── migrations/        # Migration history
 │   ├── generated/         # Generated Prisma Client
+│   ├── seed-admin.ts      # CLI to bootstrap admin users
 │   ├── client.ts          # Prisma client instance
 │   └── index.ts           # Database exports
 │
 ├── server/                # Backend Express + tRPC server
 │   ├── index.ts           # Server entry point
 │   ├── controllers/       # Business logic
-│   │   ├── auth.ts        # Authentication controllers
+│   │   ├── auth.ts        # Authentication
+│   │   ├── batch.ts       # Batch operations
 │   │   ├── business.ts    # Business management
-│   │   └── inventory.ts   # Inventory management
+│   │   ├── category.ts    # Category management
+│   │   ├── dashboard.ts   # Dashboard data
+│   │   ├── inventory.ts   # Inventory management
+│   │   ├── party.ts       # Party management
+│   │   ├── purchase.ts    # Purchase operations
+│   │   ├── returns.ts     # Returns handling
+│   │   ├── sales.ts       # Sales operations
+│   │   ├── stock.ts       # Stock management
+│   │   ├── stockops.ts    # Stock operations
+│   │   ├── warehouse.ts   # Warehouse management
+│   │   └── admin/         # Admin dashboard controllers
+│   │       ├── auth.ts    # Admin auth (getAdminMe)
+│   │       ├── users.ts   # User management
+│   │       ├── businesses.ts # Business management
+│   │       ├── analytics.ts  # Platform analytics
+│   │       ├── settings.ts   # System settings
+│   │       ├── auditLog.ts   # Audit log viewer
+│   │       └── management.ts # Admin CRUD (super admin)
 │   ├── routers/           # tRPC router definitions
 │   │   ├── auth.ts        # Auth routes
+│   │   ├── batch.ts       # Batch routes
 │   │   ├── business.ts    # Business routes
+│   │   ├── category.ts    # Category routes
+│   │   ├── dashboard.ts   # Dashboard routes
 │   │   ├── inventory.ts   # Inventory routes
-│   │   └── index.ts       # Root router
+│   │   ├── party.ts       # Party routes
+│   │   ├── purchase.ts    # Purchase routes
+│   │   ├── returns.ts     # Returns routes
+│   │   ├── s3.ts          # S3 file upload routes
+│   │   ├── sales.ts       # Sales routes
+│   │   ├── stock.ts       # Stock routes
+│   │   ├── stockops.ts    # Stock operations routes
+│   │   ├── warehouse.ts   # Warehouse routes
+│   │   ├── index.ts       # Root router
+│   │   └── admin/         # Admin routes (admin.*)
+│   │       └── index.ts   # Barrel combining sub-routers
 │   ├── trpc/              # tRPC setup
 │   │   ├── index.ts       # tRPC initialization
 │   │   ├── context.ts     # Request context
-│   │   ├── middlewares.ts # Auth middleware
-│   │   └── procedures.ts  # Public/protected procedures
+│   │   ├── middlewares.ts # Auth + admin middleware
+│   │   └── procedures.ts  # Public/protected/admin procedures
 │   ├── helpers/           # Utility functions
 │   │   ├── auth.ts        # Auth utilities
+│   │   ├── adminAuth.ts   # Admin audit logging
+│   │   ├── controllerErrorHandler.ts # Error handler
+│   │   ├── documentNumber.ts # Doc number generation
 │   │   ├── googleClient.ts # Google OAuth setup
+│   │   ├── handlePrismaError.ts # Prisma error mapping
+│   │   ├── index.ts       # Helper exports
+│   │   ├── inventoryLedger.ts # Inventory ledger logic
 │   │   ├── sendMail.ts    # Email service
 │   │   ├── tokenManagement.ts # Token handling
+│   │   ├── validateENV.ts # Env validation
+│   │   ├── aws/           # AWS utilities
 │   │   └── email-templates/ # Email HTML templates
 │   └── types/             # Backend TypeScript types
 │
@@ -69,18 +119,47 @@ seed/
     │   ├── (main)/        # Protected routes
     │   │   ├── dashboard/ # Dashboard page
     │   │   └── businesses/ # Business management
+    │   ├── (admin)/       # Admin dashboard route group
+    │   │   └── admin/     # Admin pages
+    │   │       ├── page.tsx       # Dashboard overview
+    │   │       ├── users/         # User management
+    │   │       ├── businesses/    # Business management
+    │   │       ├── analytics/     # Platform analytics
+    │   │       ├── audit-log/     # Audit log viewer
+    │   │       ├── settings/      # System settings
+    │   │       └── admins/        # Admin management
     │   └── (public)/      # Public routes
     │       └── page.tsx   # Landing page
     ├── components/        # React components
-    │   ├── ui/            # Radix UI components
+    │   ├── ui/            # Radix UI primitives (shadcn)
+    │   ├── admin/         # Admin panel components
+    │   │   ├── AdminGuard.tsx  # Auth + admin access gate
+    │   │   ├── AdminNavBar.tsx # Sidebar navigation
+    │   │   └── AdminHeader.tsx # Top header bar
+    │   ├── animations/    # Animation components
     │   ├── auth/          # Auth components
+    │   ├── batches/       # Batch components
+    │   ├── dashboard/     # Dashboard widgets
     │   ├── home/          # Landing page sections
-    │   └── main/          # Dashboard components
+    │   ├── inventory/     # Inventory components
+    │   ├── main/          # Main layout components
+    │   ├── parties/       # Party components
+    │   ├── profile/       # Profile components
+    │   ├── purchases/     # Purchase components
+    │   ├── returns/       # Returns components
+    │   ├── sales/         # Sales components
+    │   ├── shared/        # Shared components
+    │   ├── stock/         # Stock components
+    │   ├── stockops/      # Stock operations components
+    │   └── warehouses/    # Warehouse components
     ├── providers/         # React context providers
+    │   ├── AdminProvider.tsx    # Admin context (role, status)
+    │   ├── BusinessProvider.tsx # Business context
+    │   ├── CategoriesProvider.tsx # Categories context
+    │   ├── DataProvider.tsx     # Data provider
     │   ├── SessionProvider.tsx  # Auth session
-    │   ├── TRPCProvider.tsx    # API client
-    │   ├── ThemeProvider.tsx   # Dark/Light mode
-    │   └── BusinessProvider.tsx # Business context
+    │   ├── ThemeProvider.tsx    # Dark/Light mode
+    │   └── TRPCProvider.tsx    # API client
     ├── auth/              # Auth utilities
     ├── hooks/             # Custom React hooks
     └── lib/               # Utilities and helpers
@@ -379,6 +458,18 @@ pnpm --filter web start     # Start production server
 - **Token Rotation**: Automatic refresh token rotation for security
 - **Session Management**: Multi-device support with session revocation
 
+### Admin Dashboard
+
+- **Shared Auth**: Admin uses the same login as regular users (no separate auth flow)
+- **Role-Based Access**: Two-tier role system — Admin and Super Admin
+- **User Management**: List, search, view details, and delete platform users
+- **Business Management**: Browse and manage all businesses on the platform
+- **Platform Analytics**: User/business growth charts and top businesses
+- **Audit Logging**: Track admin actions with filters and pagination
+- **System Settings**: Key-value store for platform configuration (super admin)
+- **Admin Management**: Promote/demote, activate/deactivate admins (super admin)
+- **Seed Script**: CLI tool to bootstrap the first admin (`database/seed-admin.ts`)
+
 ### Business Management
 
 - Create and manage multiple businesses per user
@@ -407,7 +498,7 @@ pnpm --filter web start     # Start production server
 When modifying the schema:
 
 ```bash
-# 1. Edit database/prisma/schema.prisma
+# 1. Edit models in database/models/ (e.g., user.prisma)
 # 2. Create migration
 pnpm --filter @seed/database db:migrate
 # 3. Regenerate client
@@ -493,6 +584,24 @@ Visit: `http://localhost:8080/email-template?type=otp` or `?type=welcome`
 - Device/client information tracking
 - Revocation support
 
+### Admin
+
+- Links to User via `userId` FK (shared auth model)
+- Tracks `isSuperAdmin` and `isActive` status
+- One-to-one relation with User
+
+### AuditLog
+
+- Records admin actions (action, entity, entityId, details)
+- References the Admin who performed the action
+- Immutable append-only log
+
+### SystemSetting
+
+- Key-value store for platform-wide configuration
+- JSON `value` field supports any data type
+- Managed by super admins only
+
 ---
 
 ## 🤝 Contributing
@@ -528,7 +637,7 @@ ISC
 ### Database migration issues
 
 - Reset database (dev only): `pnpm --filter @seed/database db:migrate reset`
-- Check migration status: Check `database/prisma/migrations/`
+- Check migration status: Check `database/migrations/`
 
 ### Type errors
 

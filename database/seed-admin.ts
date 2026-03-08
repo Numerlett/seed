@@ -92,9 +92,7 @@ async function main() {
       },
     });
 
-    console.log(
-      `\nSuccessfully created ${isSuperAdmin ? 'super ' : ''}admin:`,
-    );
+    console.log(`\nSuccessfully created ${isSuperAdmin ? 'super ' : ''}admin:`);
     console.log(`  User:  ${user.name || '(no name)'} <${user.email}>`);
     console.log(`  Admin ID: ${admin.id}`);
     console.log(`  Super Admin: ${isSuperAdmin}`);

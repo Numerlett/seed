@@ -1,36 +1,124 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Web Package
 
-## Getting Started
+Next.js frontend application for the SEED retail management system.
 
-First, run the development server:
+## Overview
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+This package is the user-facing web application built with Next.js 16, React 19, Tailwind CSS v4, and shadcn/ui (Radix). It consumes the backend API via tRPC hooks provided by the `@seed/api` package.
+
+## Structure
+
+```
+web/
+├── app/                   # Next.js App Router
+│   ├── (auth)/            # Auth route group (login, OTP verification)
+│   ├── (main)/            # Protected routes (dashboard, business modules)
+│   │   ├── dashboard/
+│   │   ├── businesses/
+│   │   ├── inventory/
+│   │   ├── sales/
+│   │   ├── purchases/
+│   │   ├── returns/
+│   │   ├── parties/
+│   │   ├── warehouses/
+│   │   ├── batches/
+│   │   ├── stock-ops/
+│   │   └── layout.tsx
+│   ├── (admin)/           # Admin dashboard route group
+│   │   ├── layout.tsx     # Admin layout (sidebar + header + guard)
+│   │   └── admin/         # Admin pages
+│   │       ├── page.tsx           # Dashboard overview
+│   │       ├── users/             # User management
+│   │       ├── businesses/        # Business management
+│   │       ├── analytics/         # Growth charts
+│   │       ├── audit-log/         # Admin action log
+│   │       ├── settings/          # System settings
+│   │       └── admins/            # Admin management
+│   ├── (public)/          # Public routes (landing page)
+│   ├── layout.tsx         # Root layout
+│   └── globals.css        # Global styles
+├── components/            # React components
+│   ├── ui/                # shadcn/Radix UI primitives
+│   ├── admin/             # Admin panel (AdminGuard, AdminNavBar, AdminHeader)
+│   ├── auth/              # Auth components
+│   ├── dashboard/         # Dashboard widgets
+│   ├── inventory/         # Inventory components
+│   ├── sales/             # Sales components
+│   ├── purchases/         # Purchase components
+│   ├── returns/           # Returns components
+│   ├── parties/           # Party components
+│   ├── warehouses/        # Warehouse components
+│   ├── batches/           # Batch components
+│   ├── stock/             # Stock components
+│   ├── stockops/          # Stock operations components
+│   ├── home/              # Landing page sections
+│   ├── main/              # Main layout components
+│   ├── shared/            # Shared/reusable components
+│   ├── animations/        # Animation components
+│   └── profile/           # Profile components
+├── providers/             # React context providers
+│   ├── AdminProvider.tsx      # Admin role context
+│   ├── BusinessProvider.tsx   # Active business context
+│   ├── CategoriesProvider.tsx # Categories context
+│   ├── DataProvider.tsx       # Shared data context
+│   ├── SessionProvider.tsx    # Auth session context
+│   ├── ThemeProvider.tsx      # Dark/light mode
+│   └── TRPCProvider.tsx       # tRPC + React Query
+├── auth/                  # Auth utilities (AuthGuard)
+├── hooks/                 # Custom React hooks
+│   ├── useDebounce.tsx
+│   ├── useIsMobile.tsx
+│   └── useLocalState.tsx
+├── lib/                   # Utilities (cn, schemas)
+├── utils/                 # Helpers (data, fonts, images, themes)
+└── public/                # Static assets
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Route Groups
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Group      | Path         | Description                           |
+| ---------- | ------------ | ------------------------------------- |
+| `(auth)`   | `/login`, `/auth` | Login and OTP verification       |
+| `(main)`   | `/dashboard`, `/businesses`, etc. | Protected business modules |
+| `(admin)`  | `/admin/*`   | Admin dashboard (requires admin role) |
+| `(public)` | `/`          | Public landing page                   |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Scripts
 
-## Learn More
+```bash
+# Development
+pnpm dev
 
-To learn more about Next.js, take a look at the following resources:
+# Build
+pnpm build
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+# Production
+pnpm start
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+# Lint
+pnpm lint
+```
 
-## Deploy on Vercel
+## Key Features
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **App Router**: File-based routing with route groups and layouts
+- **shadcn/ui**: 30+ Radix-based UI components
+- **Tailwind CSS v4**: Utility-first styling
+- **tRPC Hooks**: Type-safe API calls via `clientTrpc`
+- **AuthGuard**: Protects routes from unauthenticated access
+- **AdminGuard**: Gates admin pages with role check
+- **Theme**: Dark/light mode toggle with persistence
+- **Responsive**: Mobile-friendly layout
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Environment Variables
+
+```env
+NEXT_PUBLIC_SERVER_BASE_URL=http://localhost:8080
+```
+
+## Documentation
+
+- [Next.js Documentation](https://nextjs.org/docs)
+- [shadcn/ui Documentation](https://ui.shadcn.com)
+- [Tailwind CSS Documentation](https://tailwindcss.com/docs)
+- [Radix UI Documentation](https://www.radix-ui.com/docs/primitives)

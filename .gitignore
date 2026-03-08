@@ -1,10 +1,6 @@
 node_modules
-docs
 build
 dist
 .next
 .env
-
-*.md
-!README.md
-
+.github

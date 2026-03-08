@@ -12,25 +12,67 @@ This package contains the backend server implementation, including API routes, b
 server/
 ├── index.ts              # Server entry point
 ├── controllers/          # Business logic
-│   ├── auth.ts          # Authentication controllers
+│   ├── auth.ts          # Authentication
+│   ├── batch.ts         # Batch operations
 │   ├── business.ts      # Business management
-│   └── inventory.ts     # Inventory management
+│   ├── category.ts      # Category management
+│   ├── dashboard.ts     # Dashboard data
+│   ├── inventory.ts     # Inventory management
+│   ├── party.ts         # Party management
+│   ├── purchase.ts      # Purchase operations
+│   ├── returns.ts       # Returns handling
+│   ├── sales.ts         # Sales operations
+│   ├── stock.ts         # Stock management
+│   ├── stockops.ts      # Stock operations
+│   ├── warehouse.ts     # Warehouse management
+│   └── admin/           # Admin dashboard controllers
+│       ├── auth.ts      # getAdminMe
+│       ├── users.ts     # User management
+│       ├── businesses.ts # Business management
+│       ├── analytics.ts # Platform analytics
+│       ├── settings.ts  # System settings
+│       ├── auditLog.ts  # Audit log viewer
+│       └── management.ts # Admin CRUD (super admin)
 ├── routers/             # tRPC routers
-│   ├── index.ts         # Main router
+│   ├── index.ts         # Main router (combines all)
 │   ├── auth.ts          # Auth routes
-│   └── business.ts      # Business routes
+│   ├── batch.ts         # Batch routes
+│   ├── business.ts      # Business routes
+│   ├── category.ts      # Category routes
+│   ├── dashboard.ts     # Dashboard routes
+│   ├── inventory.ts     # Inventory routes
+│   ├── party.ts         # Party routes
+│   ├── purchase.ts      # Purchase routes
+│   ├── returns.ts       # Returns routes
+│   ├── s3.ts            # S3 file upload routes
+│   ├── sales.ts         # Sales routes
+│   ├── stock.ts         # Stock routes
+│   ├── stockops.ts      # Stock operations routes
+│   ├── warehouse.ts     # Warehouse routes
+│   └── admin/           # Admin routes (admin.*)
+│       └── index.ts     # Barrel combining sub-routers
 ├── trpc/                # tRPC configuration
 │   ├── index.ts         # tRPC initialization
 │   ├── context.ts       # Request context
-│   ├── middlewares.ts   # Auth middleware
-│   └── procedures.ts    # Procedure types
+│   ├── middlewares.ts   # Auth + admin middleware
+│   └── procedures.ts    # Public/protected/admin procedures
 ├── helpers/             # Utility functions
-│   ├── auth.ts          # Auth helpers
+│   ├── auth.ts          # Auth helpers (tokens, cookies)
+│   ├── adminAuth.ts     # Admin audit logging
+│   ├── controllerErrorHandler.ts # Standardized error handler
+│   ├── documentNumber.ts # Document number generation
+│   ├── googleClient.ts  # Google OAuth setup
+│   ├── handlePrismaError.ts # Prisma error mapping
+│   ├── index.ts         # Helper exports
+│   ├── inventoryLedger.ts # Inventory ledger logic
 │   ├── sendMail.ts      # Email service
 │   ├── tokenManagement.ts # Token CRUD
+│   ├── validateENV.ts   # Environment validation
+│   ├── aws/             # AWS utilities (S3)
 │   └── email-templates/ # Email HTML templates
 └── types/               # TypeScript types
-    └── auth.ts
+    ├── auth.ts
+    └── s3.ts
 ```
 
 ## Key Features
@@ -130,6 +172,40 @@ pnpm clean
 - `business.get` - Get specific business (protected)
 - `business.update` - Update business (protected)
 - `business.delete` - Delete business (protected)
+
+### Inventory
+
+- `inventory.addProduct` - Add product (protected)
+- `inventory.getProducts` - List products (protected)
+- `inventory.getProductById` - Get product (protected)
+- `inventory.getProductCount` - Product count (protected)
+- `inventory.updateProduct` - Update product (protected)
+- `inventory.deleteProduct` - Delete product (protected)
+- `inventory.bulkDeleteProducts` - Bulk delete (protected)
+
+### Other Routes
+
+- `category.*` - Category CRUD
+- `party.*` - Party (customer/supplier) management
+- `warehouse.*` - Warehouse management
+- `batch.*` - Batch operations
+- `stock.*` - Stock queries
+- `purchase.*` - Purchase orders
+- `sales.*` - Sales orders
+- `returns.*` - Returns handling
+- `stockops.*` - Stock operations (adjustments, transfers)
+- `dashboard.*` - Dashboard data
+- `s3.*` - File upload (presigned URLs)
+
+### Admin
+
+- `admin.auth.getAdminMe` - Get admin profile (admin)
+- `admin.users.*` - User management (admin / super admin)
+- `admin.businesses.*` - Business management (admin / super admin)
+- `admin.analytics.*` - Platform analytics (admin)
+- `admin.settings.*` - System settings (admin / super admin)
+- `admin.auditLog.*` - Audit log viewer (admin)
+- `admin.management.*` - Admin CRUD (super admin)
 
 ## Adding New API Endpoints
 
