@@ -63,8 +63,8 @@ model Product {
   discountRate      Decimal
 
   // Batch & Expiry Tracking Flags
-  trackBatch    Boolean  @default(false)
-  trackExpiry   Boolean  @default(false)
+  trackBatch  Boolean @default(false)
+  trackExpiry Boolean @default(false)
 
   // Flags & Timestamps  
   isActive      Boolean  @default(true)

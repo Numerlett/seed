@@ -48,7 +48,7 @@ model StockAdjustmentItem {
   product   Product @relation(fields: [productId], references: [id])
 
   shelfId String?
-  shelf   Shelf? @relation(fields: [shelfId], references: [id])
+  shelf   Shelf?  @relation(fields: [shelfId], references: [id])
 
   batchId String?
   batch   ProductBatch? @relation(fields: [batchId], references: [id])
@@ -70,13 +70,13 @@ model StockTransfer {
   sourceWarehouse   Warehouse @relation("TransferSource", fields: [sourceWarehouseId], references: [id])
 
   sourceShelfId String?
-  sourceShelf   Shelf? @relation("TransferSourceShelf", fields: [sourceShelfId], references: [id])
+  sourceShelf   Shelf?  @relation("TransferSourceShelf", fields: [sourceShelfId], references: [id])
 
   destWarehouseId String
   destWarehouse   Warehouse @relation("TransferDest", fields: [destWarehouseId], references: [id])
 
   destShelfId String?
-  destShelf   Shelf? @relation("TransferDestShelf", fields: [destShelfId], references: [id])
+  destShelf   Shelf?  @relation("TransferDestShelf", fields: [destShelfId], references: [id])
 
   businessId String
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -143,7 +143,7 @@ model DamageReportItem {
   product   Product @relation(fields: [productId], references: [id])
 
   shelfId String?
-  shelf   Shelf? @relation(fields: [shelfId], references: [id])
+  shelf   Shelf?  @relation(fields: [shelfId], references: [id])
 
   batchId String?
   batch   ProductBatch? @relation(fields: [batchId], references: [id])

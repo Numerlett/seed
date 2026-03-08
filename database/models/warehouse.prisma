@@ -3,19 +3,19 @@
 // -----------------------------------------------------
 
 model Warehouse {
-  id         String   @id @default(cuid())
-  name       String
-  location   String?
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(cuid())
+  name      String
+  location  String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   businessId String
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
-  shelves         Shelf[]
-  ledgerEntries   InventoryLedger[]
-  stockSummaries  InventoryStock[]
+  shelves        Shelf[]
+  ledgerEntries  InventoryLedger[]
+  stockSummaries InventoryStock[]
 
   // Transaction documents
   goodsReceiptNotes GoodsReceiptNote[]
@@ -51,8 +51,8 @@ model Shelf {
   purchaseReturnItems  PurchaseReturnItem[]
   salesReturnItems     SalesReturnItem[]
   stockAdjustmentItems StockAdjustmentItem[]
-  transfersOut         StockTransfer[]    @relation("TransferSourceShelf")
-  transfersIn          StockTransfer[]    @relation("TransferDestShelf")
+  transfersOut         StockTransfer[]       @relation("TransferSourceShelf")
+  transfersIn          StockTransfer[]       @relation("TransferDestShelf")
   damageReportItems    DamageReportItem[]
 
   @@unique([warehouseId, shelfCode])

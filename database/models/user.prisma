@@ -14,6 +14,7 @@ model User {
   refreshTokens   RefreshToken[]
   businessesOwned Business[]           @relation("BusinessOwner")
   memberships     BusinessMembership[]
+  admin           Admin?
 
   @@map("users")
 }
@@ -46,4 +47,45 @@ model otp {
   updatedAt  DateTime  @updatedAt
 
   @@map("otps")
+}
+
+// -----------------------------------------------------
+// ADMIN MANAGEMENT
+// -----------------------------------------------------
+
+model Admin {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  isSuperAdmin Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  auditLogs AuditLog[]
+
+  @@map("admins")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  adminId   String
+  action    String
+  entity    String
+  entityId  String?
+  details   Json?
+  createdAt DateTime @default(now())
+
+  admin Admin @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@map("audit_logs")
+}
+
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("system_settings")
 }

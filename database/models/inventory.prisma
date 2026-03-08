@@ -31,8 +31,8 @@ enum PaymentStatus {
 model InventoryLedger {
   id              String                   @id @default(cuid())
   transactionType InventoryTransactionType
-  referenceTable  String?                  // e.g. "purchase_orders", "sale_invoices"
-  referenceId     String?                  // FK to the source document
+  referenceTable  String? // e.g. "purchase_orders", "sale_invoices"
+  referenceId     String? // FK to the source document
   quantityIn      Decimal                  @default(0)
   quantityOut     Decimal                  @default(0)
   unitCost        Decimal

@@ -27,12 +27,12 @@ model Business {
 
   costingMethod CostingMethod @default(WEIGHTED_AVERAGE)
 
-  owner      User                 @relation("BusinessOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  members    BusinessMembership[]
-  products   Product[]
-  categories Category[]
-  parties    Party[]
-  warehouses Warehouse[]
+  owner           User                 @relation("BusinessOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members         BusinessMembership[]
+  products        Product[]
+  categories      Category[]
+  parties         Party[]
+  warehouses      Warehouse[]
   inventoryLedger InventoryLedger[]
 
   // Transaction documents

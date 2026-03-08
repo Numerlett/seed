@@ -27,8 +27,8 @@ model Party {
   purchaseReturns   PurchaseReturn[]   @relation("SupplierPurchaseReturns")
 
   // Customer relations
-  saleInvoices SaleInvoice[]  @relation("CustomerSaleInvoices")
-  salesReturns SalesReturn[]  @relation("CustomerSalesReturns")
+  saleInvoices SaleInvoice[] @relation("CustomerSaleInvoices")
+  salesReturns SalesReturn[] @relation("CustomerSalesReturns")
 
   @@index([name])
   @@map("parties")

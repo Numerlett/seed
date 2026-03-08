@@ -81,3 +81,56 @@ export const isBusinessMember = t.middleware(
     });
   },
 );
+
+/**
+ * Middleware that verifies the authenticated user is a platform admin.
+ * Must be chained after `isAuthed` — uses `ctx.userId` to look up the Admin table.
+ * Injects `adminId` and `isSuperAdmin` into context.
+ */
+export const isAdmin = t.middleware(async ({ ctx, next }) => {
+  const userId = (ctx as any).userId as string | undefined;
+
+  if (!userId) {
+    throw new TRPCError({
+      code: 'UNAUTHORIZED',
+      message: 'Authentication required',
+    });
+  }
+
+  const admin = await prisma.admin.findUnique({
+    where: { userId },
+    select: { id: true, isActive: true, isSuperAdmin: true },
+  });
+
+  if (!admin || !admin.isActive) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'Admin access required',
+    });
+  }
+
+  return next({
+    ctx: {
+      userId,
+      adminId: admin.id,
+      isSuperAdmin: admin.isSuperAdmin,
+    },
+  });
+});
+
+/**
+ * Middleware that verifies the admin is a super admin.
+ * Must be chained after `isAdmin`.
+ */
+export const isSuperAdminMiddleware = t.middleware(({ ctx, next }) => {
+  const isSuperAdmin = (ctx as any).isSuperAdmin as boolean | undefined;
+
+  if (!isSuperAdmin) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'Super admin access required',
+    });
+  }
+
+  return next({ ctx });
+});

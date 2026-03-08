@@ -16,6 +16,7 @@ import { purchaseRoutes } from './purchase';
 import { salesRoutes } from './sales';
 import { returnsRoutes } from './returns';
 import { stockopsRoutes } from './stockops';
+import { adminRoutes } from './admin';
 
 export const appRouter = t.router({
   auth: authRoutes,
@@ -32,6 +33,7 @@ export const appRouter = t.router({
   sales: salesRoutes,
   returns: returnsRoutes,
   stockops: stockopsRoutes,
+  admin: adminRoutes,
 });
 
 export const trpcExpress = createExpressMiddleware({
