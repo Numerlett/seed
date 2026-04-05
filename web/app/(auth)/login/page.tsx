@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { LoaderCircleIcon, LogInIcon, SendIcon } from 'lucide-react';
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 import {
   InputOTP,
@@ -23,6 +23,10 @@ const LOGIN_STATE_KEY = 'login-otp-state';
 
 // Helper function to load persisted login state
 const loadPersistedLoginState = () => {
+  if (typeof window === 'undefined') {
+    return { email: '', otpExpiresAt: null, otpSent: false };
+  }
+
   const savedState = sessionStorage.getItem(LOGIN_STATE_KEY);
   if (savedState) {
     try {
@@ -62,8 +66,6 @@ export default function LoginPage() {
   const [otpSent, setOtpSent] = useState<boolean>(
     () => loadPersistedLoginState().otpSent,
   );
-  const [sendingOtp, startSendingOtp] = useTransition();
-  const [verifyingOtp, startVerifyingOtp] = useTransition();
 
   const emailLoginMutation = clientTrpc.auth.emailLogin.useMutation({
     onSuccess: ({ otpExpiresAt, message }) => {
@@ -98,25 +100,24 @@ export default function LoginPage() {
     },
   });
 
-  const sendOtp = async () => {
-    startSendingOtp(async () => {
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        toast.error('Please enter a valid email address');
-        return;
-      }
+  const sendingOtp = emailLoginMutation.isPending;
+  const verifyingOtp = emailVerifyMutation.isPending;
 
-      await emailLoginMutation.mutateAsync({ email });
-    });
+  const sendOtp = () => {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast.error('Please enter a valid email address');
+      return;
+    }
+
+    emailLoginMutation.mutate({ email });
   };
 
-  const verifyOtp = async () => {
-    startVerifyingOtp(async () => {
-      if (!(otp.trim() && otp.length === 6)) {
-        toast.error('Please enter a valid OTP');
-        return;
-      }
-      await emailVerifyMutation.mutateAsync({ email, otp });
-    });
+  const verifyOtp = () => {
+    if (!(otp.trim() && otp.length === 6)) {
+      toast.error('Please enter a valid OTP');
+      return;
+    }
+    emailVerifyMutation.mutate({ email, otp });
   };
 
   const CountdownRenderer: CountdownRendererFn = ({
