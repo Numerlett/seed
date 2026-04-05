@@ -2,11 +2,12 @@
 
 import { clientTrpc } from '@seed/api/client';
 import { useSearchParams } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 export default function GoogleCallback() {
   const searchParams = useSearchParams();
   const code = searchParams.get('code');
+  const hasRun = useRef(false);
 
   const googleCallbackMutation = clientTrpc.auth.googleAuthCallback.useMutation(
     {
@@ -15,7 +16,7 @@ export default function GoogleCallback() {
         if (window.opener && !window.opener.closed) {
           window.opener.postMessage(
             'logged-in-successfully',
-            window.location.origin,
+            '*',
           );
         }
 
@@ -30,7 +31,8 @@ export default function GoogleCallback() {
   );
 
   useEffect(() => {
-    if (!code) return;
+    if (!code || hasRun.current) return;
+    hasRun.current = true;
     googleCallbackMutation.mutate({ code });
   }, [code, googleCallbackMutation]);
 

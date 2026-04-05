@@ -10,3 +10,5 @@ export const getUser = async () => {
     return null;
   }
 };
+
+export * from './AuthGuard';

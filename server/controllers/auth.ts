@@ -204,11 +204,20 @@ export const emailLogin = publicProcedure
       });
 
       if (!(testUser && testUser.email === email)) {
-        await sendMail({
-          to: email,
-          subject: 'Verify your email for SEED',
-          content: otpEmailTemplate({ otp, to: email, exp: expiresAt }),
-        });
+        try {
+          await sendMail({
+            to: email,
+            subject: 'Verify your email for SEED',
+            content: otpEmailTemplate({ otp, to: email, exp: expiresAt }),
+          });
+        } catch (mailError) {
+          console.error('SMTP sending error:', mailError);
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: `Failed to send email to ${email}`,
+            cause: mailError,
+          });
+        }
       }
 
       return { otpExpiresAt: expiresAt, message: `OTP sent to ${email}` };

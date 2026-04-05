@@ -22,15 +22,28 @@ export default function GoogleButton({
   const clientTrpcUtils = clientTrpc.useUtils();
 
   useEffect(() => {
-    const handleMessage = async (event: MessageEvent) => {
+    // Flag to prevent double-firing when both postMessage and BroadcastChannel
+    // deliver the same 'logged-in-successfully' event (they both fire on success).
+    let handled = false;
+
+    const onSuccess = async () => {
+      if (handled) return;
+      handled = true;
+      toast.success('Logged in with Google successfully!');
+      await new Promise((r) => setTimeout(r, 500)); // wait for cookie propagation
+      await refreshSession();
+      if (type === 'redirect') {
+        router.push(redirect || '/');
+      }
+    };
+
+    const handleMessage = (event: MessageEvent) => {
+      // The callback popup runs on the same domain, so its postMessage origin
+      // will always equal window.location.origin. Reject any other origins.
       if (event.origin !== window.location.origin) return;
 
       if (event.data === 'logged-in-successfully') {
-        toast.success('Logged in with Google successfully!');
-        await refreshSession();
-        if (type === 'redirect') {
-          router.push(redirect || '/');
-        }
+        onSuccess();
       } else if (event.data === 'logged-in-failed') {
         toast.error('Google Login failed. Please try again.');
       }
@@ -41,13 +54,9 @@ export default function GoogleButton({
 
     // Also listen to BroadcastChannel (works even with COOP restrictions)
     const channel = new BroadcastChannel('google-auth-channel');
-    channel.onmessage = async (event) => {
+    channel.onmessage = (event) => {
       if (event.data === 'logged-in-successfully') {
-        toast.success('Logged in with Google successfully!');
-        await refreshSession();
-        if (type === 'redirect') {
-          router.push(redirect || '/');
-        }
+        onSuccess();
       }
     };
 

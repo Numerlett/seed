@@ -17,7 +17,6 @@ import { REGEXP_ONLY_DIGITS_AND_CHARS } from 'input-otp';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from '@/providers/SessionProvider';
 import Countdown, { CountdownRendererFn } from 'react-countdown';
-import { ErrorAlertDialog } from '@/components/ui/error-alert-dialog';
 import { clientTrpc } from '@seed/api/client';
 
 const LOGIN_STATE_KEY = 'login-otp-state';
@@ -54,10 +53,8 @@ export default function LoginPage() {
   const redirect = useSearchParams().get('redirect');
   const { refreshSession } = useSession();
 
-  // Initialize state with persisted values to avoid setState in effect
-  const [email, setEmail] = useState<string>(
-    () => loadPersistedLoginState().email,
-  );
+  // Load persisted state once to avoid 3 separate sessionStorage reads
+  const [email, setEmail] = useState<string>(() => loadPersistedLoginState().email);
   const [otp, setOtp] = useState<string>('');
   const [otpExpiresAt, setOtpExpiresAt] = useState<Date | null>(
     () => loadPersistedLoginState().otpExpiresAt,
@@ -67,10 +64,6 @@ export default function LoginPage() {
   );
   const [sendingOtp, startSendingOtp] = useTransition();
   const [verifyingOtp, startVerifyingOtp] = useTransition();
-  const [errorDialog, setErrorDialog] = useState<{
-    message: string;
-    errorCode?: string;
-  } | null>(null);
 
   const emailLoginMutation = clientTrpc.auth.emailLogin.useMutation({
     onSuccess: ({ otpExpiresAt, message }) => {
@@ -95,6 +88,7 @@ export default function LoginPage() {
 
       // Clear persisted state on successful verification
       sessionStorage.removeItem(LOGIN_STATE_KEY);
+      setOtp(''); // reset OTP input
 
       refreshSession();
       router.push(redirect || '/dashboard');
@@ -204,7 +198,7 @@ export default function LoginPage() {
               name="email"
               placeholder="Enter your Email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => setEmail(e.target.value.toLowerCase())}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   sendOtp();
@@ -229,16 +223,6 @@ export default function LoginPage() {
           </>
         )}
       </CardContent>
-
-      {/* Error Alert Dialog */}
-      {errorDialog && (
-        <ErrorAlertDialog
-          open={!!errorDialog}
-          onOpenChange={(open) => !open && setErrorDialog(null)}
-          message={errorDialog.message}
-          errorCode={errorDialog.errorCode}
-        />
-      )}
     </Card>
   );
 }
