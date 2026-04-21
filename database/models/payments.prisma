@@ -1,0 +1,141 @@
+/// Bank account registered by a business
+model BankAccount {
+  id             String   @id @default(cuid())
+  businessId     String
+  accountName    String
+  accountNo      String
+  ifsc           String
+  bankName       String
+  branch         String?
+  openingBalance Decimal  @default(0) @db.Decimal(15, 2)
+  currentBalance Decimal  @default(0) @db.Decimal(15, 2)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  business       Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  transactions   BankTransaction[]
+  payments       Payment[]
+
+  @@index([businessId])
+  @@map("bank_accounts")
+}
+
+/// Payment (money in or money out)
+model Payment {
+  id            String        @id @default(cuid())
+  businessId    String
+  documentNumber String       @unique
+  date          DateTime
+  type          PaymentType
+  amount        Decimal       @db.Decimal(15, 2)
+  method        PaymentMethod
+  reference     String?
+  partyId       String?
+  bankAccountId String?
+  status        PaymentTxStatus @default(CLEARED)
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  business      Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party         Party?        @relation(fields: [partyId], references: [id])
+  bankAccount   BankAccount?  @relation(fields: [bankAccountId], references: [id])
+  allocations   PaymentAllocation[]
+
+  @@index([businessId, type, date])
+  @@index([businessId, partyId])
+  @@map("payments")
+}
+
+enum PaymentType {
+  RECEIVED  // money in (from customer)
+  MADE      // money out (to supplier)
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  CARD
+  BANK_TRANSFER
+  CHEQUE
+  WALLET
+  OTHER
+}
+
+enum PaymentTxStatus {
+  PENDING
+  CLEARED
+  BOUNCED
+  CANCELLED
+}
+
+/// Links a payment to one or more invoices/bills (partial settlement)
+model PaymentAllocation {
+  id          String   @id @default(cuid())
+  paymentId   String
+  invoiceId   String?
+  billId      String?
+  amount      Decimal  @db.Decimal(15, 2)
+  createdAt   DateTime @default(now())
+
+  payment     Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@map("payment_allocations")
+}
+
+/// Cheque tracking
+model Cheque {
+  id          String        @id @default(cuid())
+  businessId  String
+  chequeNo    String
+  bankName    String
+  partyId     String?
+  amount      Decimal       @db.Decimal(15, 2)
+  dueDate     DateTime
+  type        PaymentType
+  status      ChequeStatus  @default(PENDING)
+  clearedDate DateTime?
+  notes       String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@map("cheques")
+}
+
+enum ChequeStatus {
+  PENDING
+  CLEARED
+  BOUNCED
+  CANCELLED
+}
+
+/// Raw bank statement transactions imported via CSV/Excel
+model BankTransaction {
+  id              String   @id @default(cuid())
+  bankAccountId   String
+  date            DateTime
+  description     String
+  amount          Decimal  @db.Decimal(15, 2)
+  type            BankTxType
+  balance         Decimal? @db.Decimal(15, 2)
+  reference       String?
+  reconciled      Boolean  @default(false)
+  matchedPaymentId String?
+  createdAt       DateTime @default(now())
+
+  bankAccount     BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  @@index([bankAccountId, date])
+  @@index([bankAccountId, reconciled])
+  @@map("bank_transactions")
+}
+
+enum BankTxType {
+  CREDIT
+  DEBIT
+}

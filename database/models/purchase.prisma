@@ -15,6 +15,14 @@ model PurchaseOrder {
   taxAmount      Decimal        @default(0)
   discountAmount Decimal        @default(0)
   grandTotal     Decimal        @default(0)
+
+  // GST amounts
+  taxableAmount  Decimal        @default(0)
+  cgstAmount     Decimal        @default(0)
+  sgstAmount     Decimal        @default(0)
+  igstAmount     Decimal        @default(0)
+  cessAmount     Decimal        @default(0)
+
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 

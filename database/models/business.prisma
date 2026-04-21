@@ -22,6 +22,19 @@ model Business {
   logoImage   String?
   website     String?
 
+  // GST / Tax identity
+  gstin       String?
+  pan         String?
+  stateCode   String? @db.VarChar(2)
+
+  // Address
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  state        String?
+  postalCode   String?
+  country      String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -44,6 +57,22 @@ model Business {
   stockAdjustments  StockAdjustment[]
   stockTransfers    StockTransfer[]
   damageReports     DamageReport[]
+
+  // New modules
+  gstRegistration    GSTRegistration?
+  chartOfAccounts    ChartOfAccount[]
+  fiscalYears        FiscalYear[]
+  bankAccounts       BankAccount[]
+  payments           Payment[]
+  cheques            Cheque[]
+  messageTemplates   MessageTemplate[]
+  billsOfMaterials   BillOfMaterials[]
+  workOrders         WorkOrder[]
+  serialNumbers      SerialNumber[]
+  leads              Lead[]
+  activities         Activity[]
+  tasks              Task[]
+  costCentres        CostCentre[]
 
   @@unique([ownerId, name])
   @@map("businesses")

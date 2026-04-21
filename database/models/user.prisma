@@ -11,10 +11,11 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  refreshTokens   RefreshToken[]
-  businessesOwned Business[]           @relation("BusinessOwner")
-  memberships     BusinessMembership[]
-  admin           Admin?
+  refreshTokens           RefreshToken[]
+  businessesOwned         Business[]           @relation("BusinessOwner")
+  memberships             BusinessMembership[]
+  admin                   Admin?
+  notificationPreference  NotificationPreference?
 
   @@map("users")
 }

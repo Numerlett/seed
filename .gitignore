@@ -3,6 +3,3 @@ build
 dist
 .next
 .env
-.github
-.claude
-.agent

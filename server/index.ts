@@ -6,13 +6,14 @@ import cookieParser from 'cookie-parser';
 import { validateENV } from './helpers/validateENV';
 import { emailTemplateHandler } from './helpers/email-templates';
 import { healthCheckHandler } from './helpers';
+import { logger, requestLogger } from './helpers/logger';
 export type * from './routers';
 
 dotenv.config();
 
 const envValidation = validateENV();
 if (!envValidation.success) {
-  console.error(envValidation.error);
+  logger.error(envValidation.error);
   process.exit(1);
 }
 
@@ -26,6 +27,7 @@ app.use(
     credentials: true,
   }),
 );
+app.use(requestLogger);
 
 app.get('/', (_req, res) => res.send('This is SEED server.'));
 app.get('/health', healthCheckHandler);
@@ -34,4 +36,4 @@ app.use('/api', trpcExpress);
 
 const PORT = process.env.PORT || 8080;
 
-app.listen(PORT, () => console.log(`Listening on port ${PORT}`));
+app.listen(PORT, () => logger.info(`Listening on port ${PORT}`));

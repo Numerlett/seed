@@ -62,11 +62,17 @@ model Product {
   taxRate           Decimal
   discountRate      Decimal
 
-  // Batch & Expiry Tracking Flags
-  trackBatch  Boolean @default(false)
-  trackExpiry Boolean @default(false)
+  // GST / Tax classification
+  hsnCode     String?
+  sacCode     String?
+  cessRate    Decimal @default(0)
 
-  // Flags & Timestamps  
+  // Batch & Expiry Tracking Flags
+  trackBatch   Boolean @default(false)
+  trackExpiry  Boolean @default(false)
+  trackSerial  Boolean @default(false)
+
+  // Flags & Timestamps
   isActive      Boolean  @default(true)
   isService     Boolean  @default(false)
   allowNegative Boolean  @default(false)
@@ -93,6 +99,11 @@ model Product {
   stockAdjustmentItems StockAdjustmentItem[]
   stockTransferItems   StockTransferItem[]
   damageReportItems    DamageReportItem[]
+
+  // Manufacturing
+  billsOfMaterials BillOfMaterials[]
+  bomComponents    BOMComponent[]
+  serialNumbers    SerialNumber[]
 
   @@index([businessId, name])
   @@map("products")

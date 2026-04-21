@@ -5,8 +5,7 @@
     "rootDir": ".",
     "esModuleInterop": true,
     "jsx": "react-jsx",
-    "skipLibCheck": true,
-    "moduleResolution": "node"
+    "skipLibCheck": true
   },
   "exclude": ["node_modules", "dist"]
 }

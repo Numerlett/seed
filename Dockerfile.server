@@ -3,42 +3,41 @@
 # ========================
 FROM node:24-alpine AS builder
 
-# Install pnpm
 RUN npm install -g pnpm
 
 WORKDIR /app
 
-# Copy workspace config
+# Workspace manifests
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json ./
 
-# Copy packages
-COPY database ./database
-COPY schemas ./schemas
-COPY server ./server
+# Copy all workspace packages needed by the server
+COPY database/ ./database/
+COPY schemas/ ./schemas/
+COPY jobs/ ./jobs/
+COPY tax/ ./tax/
+COPY accounting/ ./accounting/
+COPY integrations/ ./integrations/
+COPY pdf/ ./pdf/
+COPY server/ ./server/
 
-# Install all dependencies (needed for build)
+# Install all dependencies
 RUN pnpm install --frozen-lockfile
 
-
-# Generate Prisma client
-RUN pnpm --filter @seed/database db:generate
-
-# Build schemas package
-RUN pnpm --filter @seed/schemas build
-
-# Build database package
+# Build in dependency order
 RUN pnpm --filter @seed/database build
-
-# Build server package
+RUN pnpm --filter @seed/schemas build
+RUN pnpm --filter @seed/integrations build
+RUN pnpm --filter @seed/jobs build
+RUN pnpm --filter @seed/tax build
+RUN pnpm --filter @seed/accounting build
+RUN pnpm --filter @seed/pdf build
 RUN pnpm --filter @seed/server build
-
 
 # ========================
 # Runner stage
 # ========================
 FROM node:24-alpine AS runner
 
-# Install pnpm
 RUN npm install -g pnpm
 
 WORKDIR /app
@@ -46,15 +45,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8080
 
-# Copy workspace config (required for pnpm)
+# Workspace manifests needed for pnpm workspaces
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
-
-# Copy built schemas package
-COPY --from=builder /app/schemas/package.json ./schemas/
-COPY --from=builder /app/schemas/dist ./schemas/dist
-
-# Copy built database package
+# database — includes generated Prisma client and migrations
 COPY --from=builder /app/database/package.json ./database/
 COPY --from=builder /app/database/dist ./database/dist
 COPY --from=builder /app/database/generated ./database/generated
@@ -62,19 +56,35 @@ COPY --from=builder /app/database/schema.prisma ./database/
 COPY --from=builder /app/database/migrations ./database/migrations
 COPY --from=builder /app/database/prisma.config.ts ./database/
 
+# library packages (JS bundles only, no source)
+COPY --from=builder /app/schemas/package.json ./schemas/
+COPY --from=builder /app/schemas/dist ./schemas/dist
 
-# Copy built server package
+COPY --from=builder /app/jobs/package.json ./jobs/
+COPY --from=builder /app/jobs/dist ./jobs/dist
+
+COPY --from=builder /app/tax/package.json ./tax/
+COPY --from=builder /app/tax/dist ./tax/dist
+
+COPY --from=builder /app/accounting/package.json ./accounting/
+COPY --from=builder /app/accounting/dist ./accounting/dist
+
+COPY --from=builder /app/integrations/package.json ./integrations/
+COPY --from=builder /app/integrations/dist ./integrations/dist
+
+COPY --from=builder /app/pdf/package.json ./pdf/
+COPY --from=builder /app/pdf/dist ./pdf/dist
+
+# server bundle
 COPY --from=builder /app/server/package.json ./server/
 COPY --from=builder /app/server/dist ./server/dist
 
 # Install production dependencies only
 RUN pnpm install --prod --frozen-lockfile
 
-# Expose server port
 EXPOSE 8080
 
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://127.0.0.1:8080/health', res => process.exit(res.statusCode === 200 ? 0 : 1))"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "require('http').get('http://127.0.0.1:8080/health', r => process.exit(r.statusCode === 200 ? 0 : 1))"
 
-CMD ["sh", "-c", "pnpm --filter @seed/database db:deploy && pnpm --filter @seed/server start"]
+CMD ["sh", "-c", "pnpm --filter @seed/database db:deploy && node server/dist/index.js"]

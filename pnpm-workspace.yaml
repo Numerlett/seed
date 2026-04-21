@@ -4,3 +4,8 @@ packages:
   - database
   - schemas
   - api
+  - jobs
+  - pdf
+  - tax
+  - accounting
+  - integrations

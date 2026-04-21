@@ -1,0 +1,106 @@
+/// GST registration profile per business
+model GSTRegistration {
+  id                 String   @id @default(cuid())
+  businessId         String   @unique
+  gstin              String
+  tradeName          String
+  legalName          String
+  stateCode          String   @db.VarChar(2)
+  registrationType   GSTRegistrationType @default(REGULAR)
+  placeOfBusiness    String?
+  pan                String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  business           Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@map("gst_registrations")
+}
+
+enum GSTRegistrationType {
+  REGULAR
+  COMPOSITION
+  UNREGISTERED
+}
+
+/// HSN code master (seeded from govt data)
+model HSNCode {
+  id          String @id @default(cuid())
+  code        String @unique
+  description String
+  taxRate     Float  @default(18)
+
+  @@index([code])
+  @@map("hsn_codes")
+}
+
+/// SAC code master for services
+model SACCode {
+  id          String @id @default(cuid())
+  code        String @unique
+  description String
+  taxRate     Float  @default(18)
+
+  @@index([code])
+  @@map("sac_codes")
+}
+
+/// E-Invoice record (IRN + signed QR from IRP)
+model EInvoice {
+  id            String   @id @default(cuid())
+  invoiceId     String   @unique
+  businessId    String
+  irn           String?  @unique
+  ackNo         String?
+  ackDate       DateTime?
+  signedQRCode  String?  @db.Text
+  signedInvoice String?  @db.Text
+  status        EInvoiceStatus @default(PENDING)
+  cancelledAt   DateTime?
+  cancelReason  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  invoice       SaleInvoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([businessId, status])
+  @@map("e_invoices")
+}
+
+enum EInvoiceStatus {
+  PENDING
+  GENERATED
+  CANCELLATION_PENDING
+  CANCELLED
+  FAILED
+}
+
+/// E-Way Bill record
+model EWayBill {
+  id             String   @id @default(cuid())
+  invoiceId      String   @unique
+  businessId     String
+  ewbNo          String?
+  ewbDate        DateTime?
+  validUpto      DateTime?
+  transporterId  String?
+  vehicleNo      String?
+  vehicleType    String?
+  distance       Int?
+  transportMode  String?
+  status         EWayBillStatus @default(PENDING)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  invoice        SaleInvoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([businessId, status])
+  @@map("e_way_bills")
+}
+
+enum EWayBillStatus {
+  PENDING
+  GENERATED
+  CANCELLED
+  EXPIRED
+}

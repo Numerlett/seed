@@ -13,6 +13,12 @@ import {
   ShoppingCart,
   Users,
   Warehouse,
+  FileText,
+  BookOpen,
+  Wallet,
+  Building2,
+  Factory,
+  UserCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
@@ -90,6 +96,41 @@ export default function Navbar() {
       title: 'Batches',
       href: '/batches',
       icon: Layers,
+    },
+    {
+      title: 'Accounting',
+      href: '/accounting',
+      icon: BookOpen,
+    },
+    {
+      title: 'Payments',
+      href: '/payments',
+      icon: Wallet,
+    },
+    {
+      title: 'Banking',
+      href: '/banking',
+      icon: Building2,
+    },
+    {
+      title: 'Manufacturing',
+      href: '/manufacturing',
+      icon: Factory,
+    },
+    {
+      title: 'CRM',
+      href: '/crm',
+      icon: UserCheck,
+    },
+    {
+      title: 'Tax & GST',
+      href: '/tax',
+      icon: FileText,
+    },
+    {
+      title: 'Reports',
+      href: '/reports',
+      icon: BarChart3,
     },
     {
       title: 'Analytics',

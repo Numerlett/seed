@@ -1,0 +1,130 @@
+/// Bill of Materials — recipe to produce a finished product
+model BillOfMaterials {
+  id             String   @id @default(cuid())
+  businessId     String
+  productId      String
+  version        Int      @default(1)
+  isActive       Boolean  @default(true)
+  yieldQuantity  Decimal  @default(1) @db.Decimal(10, 3)
+  yieldUnit      String?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  business       Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  product        Product    @relation(fields: [productId], references: [id])
+  components     BOMComponent[]
+  workOrders     WorkOrder[]
+
+  @@index([businessId, productId])
+  @@map("bills_of_materials")
+}
+
+/// Individual component (raw material) in a BOM
+model BOMComponent {
+  id           String  @id @default(cuid())
+  bomId        String
+  componentProductId String
+  quantity     Decimal @db.Decimal(10, 3)
+  unit         String?
+  scrapPercent Decimal @default(0) @db.Decimal(5, 2)
+  notes        String?
+
+  bom          BillOfMaterials @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  component    Product         @relation(fields: [componentProductId], references: [id])
+
+  @@index([bomId])
+  @@map("bom_components")
+}
+
+/// Work order — produce a quantity of a finished product
+model WorkOrder {
+  id              String          @id @default(cuid())
+  businessId      String
+  documentNumber  String          @unique
+  bomId           String
+  plannedQuantity Decimal         @db.Decimal(10, 3)
+  actualQuantity  Decimal?        @db.Decimal(10, 3)
+  startDate       DateTime?
+  endDate         DateTime?
+  warehouseId     String?
+  status          WorkOrderStatus @default(DRAFT)
+  notes           String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  business        Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  bom             BillOfMaterials @relation(fields: [bomId], references: [id])
+  consumptions    WorkOrderConsumption[]
+  outputs         WorkOrderOutput[]
+
+  @@index([businessId, status])
+  @@map("work_orders")
+}
+
+enum WorkOrderStatus {
+  DRAFT
+  RELEASED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+/// Raw materials consumed in a work order
+model WorkOrderConsumption {
+  id          String  @id @default(cuid())
+  workOrderId String
+  productId   String
+  quantity    Decimal @db.Decimal(10, 3)
+  unitCost    Decimal @db.Decimal(15, 2)
+  totalCost   Decimal @db.Decimal(15, 2)
+  batchId     String?
+
+  workOrder   WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+
+  @@map("work_order_consumptions")
+}
+
+/// Finished goods produced by a work order
+model WorkOrderOutput {
+  id          String  @id @default(cuid())
+  workOrderId String
+  productId   String
+  quantity    Decimal @db.Decimal(10, 3)
+  unitCost    Decimal @db.Decimal(15, 2)
+  batchId     String?
+
+  workOrder   WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+
+  @@map("work_order_outputs")
+}
+
+/// Serial number tracking (high-value items, electronics, etc.)
+model SerialNumber {
+  id          String       @id @default(cuid())
+  businessId  String
+  productId   String
+  serial      String
+  status      SerialStatus @default(IN_STOCK)
+  purchaseDate DateTime?
+  saleDate     DateTime?
+  linkedSaleItemId String?
+  warrantyExpiry   DateTime?
+  notes        String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  product      Product  @relation(fields: [productId], references: [id])
+
+  @@unique([businessId, serial])
+  @@index([businessId, productId])
+  @@map("serial_numbers")
+}
+
+enum SerialStatus {
+  IN_STOCK
+  SOLD
+  RETURNED
+  DAMAGED
+}

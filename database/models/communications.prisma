@@ -1,0 +1,83 @@
+/// Reusable message templates per business
+model MessageTemplate {
+  id          String          @id @default(cuid())
+  businessId  String?         // null = platform-level template
+  type        MessageType
+  channel     MessageChannel
+  name        String
+  subject     String?         // for email
+  body        String          @db.Text
+  variables   String[]        // list of {{variable}} placeholders
+  isDefault   Boolean         @default(false)
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  business    Business?       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  logs        MessageLog[]
+
+  @@index([businessId, type, channel])
+  @@map("message_templates")
+}
+
+enum MessageType {
+  INVOICE
+  PAYMENT_REMINDER
+  PAYMENT_RECEIVED
+  GRN_RECEIVED
+  LOW_STOCK
+  OTP
+  WELCOME
+  CUSTOM
+}
+
+enum MessageChannel {
+  EMAIL
+  SMS
+  WHATSAPP
+}
+
+/// Sent message log
+model MessageLog {
+  id          String         @id @default(cuid())
+  businessId  String?
+  templateId  String?
+  channel     MessageChannel
+  to          String
+  subject     String?
+  body        String         @db.Text
+  status      MessageStatus  @default(PENDING)
+  sentAt      DateTime?
+  error       String?
+  partyId     String?
+  referenceId String?        // invoiceId, orderId, etc.
+  createdAt   DateTime       @default(now())
+
+  template    MessageTemplate? @relation(fields: [templateId], references: [id])
+
+  @@index([businessId, channel, createdAt])
+  @@map("message_logs")
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  FAILED
+  DELIVERED
+}
+
+/// Per-user notification preferences
+model NotificationPreference {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  emailEnabled Boolean @default(true)
+  smsEnabled  Boolean  @default(false)
+  whatsappEnabled Boolean @default(false)
+  lowStockAlerts  Boolean @default(true)
+  paymentReminders Boolean @default(true)
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}

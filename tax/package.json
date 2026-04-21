@@ -1,0 +1,24 @@
+{
+  "name": "@seed/tax",
+  "version": "1.0.0",
+  "description": "Tax engine: GST/VAT computation, HSN/SAC resolution, e-invoice, e-way bill",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs --out-dir dist --dts",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@seed/database": "workspace:*",
+    "axios": "^1.13.5",
+    "dotenv": "^17.3.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.3",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  }
+}

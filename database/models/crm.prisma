@@ -1,0 +1,113 @@
+/// Sales lead
+model Lead {
+  id          String     @id @default(cuid())
+  businessId  String
+  name        String
+  phone       String?
+  email       String?
+  company     String?
+  source      LeadSource @default(MANUAL)
+  stage       LeadStage  @default(NEW)
+  value       Decimal?   @db.Decimal(15, 2)
+  ownerId     String?
+  convertedPartyId String?
+  notes       String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  business    Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  activities  Activity[]
+
+  @@index([businessId, stage])
+  @@map("leads")
+}
+
+enum LeadSource {
+  MANUAL
+  WEBSITE
+  REFERRAL
+  SOCIAL_MEDIA
+  WALK_IN
+  COLD_CALL
+  OTHER
+}
+
+enum LeadStage {
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL
+  WON
+  LOST
+}
+
+/// Activity log (calls, meetings, notes, emails)
+model Activity {
+  id          String       @id @default(cuid())
+  businessId  String
+  type        ActivityType
+  title       String
+  notes       String?      @db.Text
+  partyId     String?
+  leadId      String?
+  assigneeId  String?
+  scheduledAt DateTime?
+  completedAt DateTime?
+  outcome     String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  business    Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party       Party?    @relation(fields: [partyId], references: [id])
+  lead        Lead?     @relation(fields: [leadId], references: [id])
+
+  @@index([businessId, partyId])
+  @@index([businessId, leadId])
+  @@map("activities")
+}
+
+enum ActivityType {
+  CALL
+  MEETING
+  NOTE
+  EMAIL
+  WHATSAPP
+  TASK
+  OTHER
+}
+
+/// Task / follow-up
+model Task {
+  id          String     @id @default(cuid())
+  businessId  String
+  title       String
+  description String?
+  assigneeId  String?
+  partyId     String?
+  leadId      String?
+  dueAt       DateTime?
+  status      TaskStatus @default(PENDING)
+  priority    TaskPriority @default(MEDIUM)
+  completedAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  business    Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, assigneeId, status])
+  @@map("tasks")
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}

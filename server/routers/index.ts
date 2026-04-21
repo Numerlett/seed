@@ -17,6 +17,12 @@ import { salesRoutes } from './sales';
 import { returnsRoutes } from './returns';
 import { stockopsRoutes } from './stockops';
 import { adminRoutes } from './admin';
+import { taxRoutes } from '../modules/tax/routers';
+import { accountingRoutes } from '../modules/accounting/routers';
+import { paymentsRoutes } from '../modules/payments/routers';
+import { manufacturingRoutes } from '../modules/manufacturing/routers';
+import { crmRoutes } from '../modules/crm/routers';
+import { reportsRoutes } from '../modules/reports/routers';
 
 export const appRouter = t.router({
   auth: authRoutes,
@@ -34,6 +40,12 @@ export const appRouter = t.router({
   returns: returnsRoutes,
   stockops: stockopsRoutes,
   admin: adminRoutes,
+  tax: taxRoutes,
+  accounting: accountingRoutes,
+  payments: paymentsRoutes,
+  manufacturing: manufacturingRoutes,
+  crm: crmRoutes,
+  reports: reportsRoutes,
 });
 
 export const trpcExpress = createExpressMiddleware({

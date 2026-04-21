@@ -17,6 +17,13 @@ model Party {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
   businessId String
+
+  // GST / Tax identity
+  gstin      String?
+  pan        String?
+  stateCode  String? @db.VarChar(2)
+  customerType CustomerType @default(B2C)
+
   business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   addresses Address[]
@@ -30,8 +37,19 @@ model Party {
   saleInvoices SaleInvoice[] @relation("CustomerSaleInvoices")
   salesReturns SalesReturn[] @relation("CustomerSalesReturns")
 
+  // New modules
+  payments   Payment[]
+  activities Activity[]
+
   @@index([name])
   @@map("parties")
+}
+
+enum CustomerType {
+  B2B
+  B2C
+  EXPORT
+  SEZ
 }
 
 model Address {

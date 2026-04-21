@@ -1,0 +1,144 @@
+/// Chart of Accounts — seeded with Indian standard COA
+model ChartOfAccount {
+  id          String         @id @default(cuid())
+  businessId  String
+  code        String
+  name        String
+  type        AccountType
+  subType     AccountSubType
+  parentId    String?
+  isSystem    Boolean        @default(false) // system accounts cannot be deleted
+  isActive    Boolean        @default(true)
+  openingBalance Decimal     @default(0) @db.Decimal(15, 2)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  business    Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  parent      ChartOfAccount? @relation("COAParent", fields: [parentId], references: [id])
+  children    ChartOfAccount[] @relation("COAParent")
+  journalLines JournalLine[]
+
+  @@unique([businessId, code])
+  @@index([businessId, type])
+  @@map("chart_of_accounts")
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  INCOME
+  EXPENSE
+}
+
+enum AccountSubType {
+  CASH
+  BANK
+  ACCOUNTS_RECEIVABLE
+  INVENTORY
+  FIXED_ASSET
+  OTHER_ASSET
+  ACCOUNTS_PAYABLE
+  GST_PAYABLE
+  TDS_PAYABLE
+  LOAN
+  OTHER_LIABILITY
+  CAPITAL
+  RETAINED_EARNINGS
+  DRAWINGS
+  SALES
+  OTHER_INCOME
+  INTEREST_INCOME
+  PURCHASE
+  COGS
+  OPERATING_EXPENSE
+  DEPRECIATION
+  TAX_EXPENSE
+  OTHER_EXPENSE
+}
+
+/// Fiscal year (locked after year-end close)
+model FiscalYear {
+  id         String   @id @default(cuid())
+  businessId String
+  startDate  DateTime
+  endDate    DateTime
+  isLocked   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entries    JournalEntry[]
+
+  @@index([businessId])
+  @@map("fiscal_years")
+}
+
+/// A balanced double-entry journal entry
+model JournalEntry {
+  id           String        @id @default(cuid())
+  businessId   String
+  fiscalYearId String?
+  date         DateTime
+  source       JournalSource
+  sourceId     String
+  narration    String
+  postedBy     String?
+  isReversed   Boolean       @default(false)
+  reversalOf   String?
+  createdAt    DateTime      @default(now())
+
+  fiscalYear   FiscalYear?   @relation(fields: [fiscalYearId], references: [id])
+  lines        JournalLine[]
+
+  @@index([businessId, date])
+  @@index([businessId, source, sourceId])
+  @@map("journal_entries")
+}
+
+enum JournalSource {
+  SALE_INVOICE
+  SALE_RETURN
+  GRN
+  PURCHASE_RETURN
+  PAYMENT_RECEIVED
+  PAYMENT_MADE
+  STOCK_ADJUSTMENT
+  DAMAGE_REPORT
+  PAYROLL_RUN
+  DEPRECIATION_RUN
+  MANUAL
+}
+
+/// Individual debit/credit line within a journal entry
+model JournalLine {
+  id           String         @id @default(cuid())
+  entryId      String
+  accountId    String
+  debit        Decimal        @default(0) @db.Decimal(15, 2)
+  credit       Decimal        @default(0) @db.Decimal(15, 2)
+  narration    String?
+  partyId      String?
+  costCenterId String?
+
+  entry        JournalEntry   @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  account      ChartOfAccount @relation(fields: [accountId], references: [id])
+
+  @@index([entryId])
+  @@index([accountId])
+  @@map("journal_lines")
+}
+
+/// Cost centre for dimensional accounting
+model CostCentre {
+  id         String   @id @default(cuid())
+  businessId String
+  name       String
+  code       String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, name])
+  @@map("cost_centres")
+}
