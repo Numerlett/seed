@@ -3,9 +3,7 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": ".",
-    "esModuleInterop": true,
-    "jsx": "react-jsx",
-    "skipLibCheck": true
+    "esModuleInterop": true
   },
   "exclude": ["node_modules", "dist"]
 }

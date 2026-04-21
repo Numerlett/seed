@@ -3,7 +3,13 @@
     "allow": [
       "Bash(pnpm add *)",
       "Bash(pnpm --filter web build)",
-      "Bash(pnpm --filter @seed/database build)"
+      "Bash(pnpm --filter @seed/database build)",
+      "Bash(git mv *)",
+      "Bash(rmdir jobs/src)",
+      "Bash(mkdir -p pdf/templates)",
+      "Bash(rmdir pdf/src/templates pdf/src)",
+      "Bash(mkdir -p jobs/lib)",
+      "Bash(mkdir -p integrations/adapters)"
     ]
   },
   "hooks": {

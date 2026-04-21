@@ -20,7 +20,7 @@
   },
   "scripts": {
     "prebuild": "prisma generate",
-    "build": "tsup index.ts generated/client.ts generated/models.ts --format cjs --out-dir dist && tsc --emitDeclarationOnly --outDir dist",
+    "build": "tsup index.ts generated/client.ts generated/models.ts --format cjs --out-dir dist --shims && tsc --emitDeclarationOnly --outDir dist",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "db:generate": "prisma generate",

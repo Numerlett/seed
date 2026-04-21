@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "pnpm --filter @seed/database --filter @seed/schemas build",
+    "prebuild": "pnpm --filter @seed/database --filter @seed/schemas build && pnpm --filter @seed/tax --filter @seed/accounting --filter @seed/jobs build",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
