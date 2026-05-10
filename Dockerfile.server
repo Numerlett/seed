@@ -20,8 +20,10 @@ COPY integrations/ ./integrations/
 COPY pdf/ ./pdf/
 COPY server/ ./server/
 
-# Install all dependencies
-RUN pnpm install --frozen-lockfile
+# Install all dependencies; rebuild native addons separately because
+# pnpm v10 ERR_PNPM_IGNORED_BUILDS blocks --frozen-lockfile + build scripts
+RUN pnpm install --frozen-lockfile --ignore-scripts
+RUN pnpm rebuild @prisma/engines prisma esbuild msgpackr-extract
 
 # Build in dependency order
 RUN pnpm --filter @seed/database build
@@ -80,7 +82,8 @@ COPY --from=builder /app/server/package.json ./server/
 COPY --from=builder /app/server/dist ./server/dist
 
 # Install production dependencies only
-RUN pnpm install --prod --frozen-lockfile
+RUN pnpm install --prod --frozen-lockfile --ignore-scripts
+RUN pnpm rebuild @prisma/engines prisma msgpackr-extract
 
 EXPOSE 8080
 
