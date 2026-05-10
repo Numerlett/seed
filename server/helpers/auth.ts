@@ -7,6 +7,7 @@ import type { UserModel } from '@seed/database/generated/models';
 import dotenv from 'dotenv';
 import { AccessTokenPayload, RefreshTokenPayload } from '../types/auth';
 import { parseUserAgent, extractIpAddress } from './deviceParser';
+import { logger } from './logger';
 
 dotenv.config();
 
@@ -21,7 +22,6 @@ const requiredEnvVars = [
 
 for (const envVar of requiredEnvVars) {
   if (!process.env[envVar]) {
-    console.error(`❌ Missing required environment variable: ${envVar}`);
     throw new Error(`Missing required environment variable: ${envVar}`);
   }
 }
@@ -78,8 +78,8 @@ if (
   process.env.NODE_ENV === 'production' &&
   (process.env.TEST_MAIL || process.env.TEST_OTP)
 ) {
-  console.warn(
-    '⚠️  WARNING: Test credentials are configured in production environment. This is a security risk!',
+  logger.warn(
+    'Test credentials are configured in production environment — security risk',
   );
 }
 

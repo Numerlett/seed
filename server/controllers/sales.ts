@@ -143,25 +143,29 @@ export const getSaleInvoices = businessMemberProcedure
   )
   .query(async ({ input, ctx }) => {
     try {
-      const where: any = { businessId: input.businessId };
-
-      if (input.status) where.status = input.status;
-      if (input.paymentStatus) where.paymentStatus = input.paymentStatus;
-      if (input.customerId) where.customerId = input.customerId;
-      if (input.warehouseId) where.warehouseId = input.warehouseId;
-      if (input.search) {
-        where.OR = [
-          { documentNumber: { contains: input.search, mode: 'insensitive' } },
-          {
-            customer: { name: { contains: input.search, mode: 'insensitive' } },
+      const where: Prisma.SaleInvoiceWhereInput = {
+        businessId: input.businessId,
+        ...(input.status && { status: input.status }),
+        ...(input.paymentStatus && { paymentStatus: input.paymentStatus }),
+        ...(input.customerId && { customerId: input.customerId }),
+        ...(input.warehouseId && { warehouseId: input.warehouseId }),
+        ...(input.search && {
+          OR: [
+            { documentNumber: { contains: input.search, mode: 'insensitive' } },
+            {
+              customer: {
+                name: { contains: input.search, mode: 'insensitive' },
+              },
+            },
+          ],
+        }),
+        ...((input.startDate || input.endDate) && {
+          invoiceDate: {
+            ...(input.startDate && { gte: input.startDate }),
+            ...(input.endDate && { lte: input.endDate }),
           },
-        ];
-      }
-      if (input.startDate || input.endDate) {
-        where.invoiceDate = {};
-        if (input.startDate) where.invoiceDate.gte = input.startDate;
-        if (input.endDate) where.invoiceDate.lte = input.endDate;
-      }
+        }),
+      };
 
       const [data, total] = await prisma.$transaction([
         prisma.saleInvoice.findMany({
@@ -278,23 +282,23 @@ export const updateSaleInvoice = businessMemberProcedure
         });
       }
 
-      const updateData: any = { ...input.data };
+      const { items: inputItems, ...scalarFields } = input.data;
 
-      if (input.data.items) {
+      type ScalarUpdate = Prisma.SaleInvoiceUpdateInput;
+
+      if (inputItems) {
         let totalAmount = 0;
         let taxAmount = 0;
         let discountAmount = 0;
 
-        const productIds = [
-          ...new Set(input.data.items.map((i) => i.productId)),
-        ];
+        const productIds = [...new Set(inputItems.map((i) => i.productId))];
         const products = await prisma.product.findMany({
           where: { id: { in: productIds } },
           select: { id: true, costPrice: true },
         });
         const costMap = new Map(products.map((p) => [p.id, p.costPrice]));
 
-        const itemsData = input.data.items.map((item) => {
+        const itemsData = inputItems.map((item) => {
           const computed = computeItemTotal(
             item.quantity,
             item.unitPrice,
@@ -318,11 +322,13 @@ export const updateSaleInvoice = businessMemberProcedure
           };
         });
 
-        updateData.totalAmount = totalAmount;
-        updateData.taxAmount = taxAmount;
-        updateData.discountAmount = discountAmount;
-        updateData.grandTotal = totalAmount - discountAmount + taxAmount;
-        delete updateData.items;
+        const computedTotals: ScalarUpdate = {
+          ...scalarFields,
+          totalAmount,
+          taxAmount,
+          discountAmount,
+          grandTotal: totalAmount - discountAmount + taxAmount,
+        };
 
         await prisma.saleInvoiceItem.deleteMany({
           where: { saleInvoiceId: input.id },
@@ -331,7 +337,7 @@ export const updateSaleInvoice = businessMemberProcedure
         const invoice = await prisma.saleInvoice.update({
           where: { id: input.id },
           data: {
-            ...updateData,
+            ...computedTotals,
             items: { create: itemsData },
           },
           include: {
@@ -350,7 +356,7 @@ export const updateSaleInvoice = businessMemberProcedure
 
       const invoice = await prisma.saleInvoice.update({
         where: { id: input.id },
-        data: updateData,
+        data: scalarFields as ScalarUpdate,
         include: {
           items: {
             include: {

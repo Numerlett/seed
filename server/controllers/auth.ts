@@ -30,6 +30,8 @@ import otpEmailTemplate from '../helpers/email-templates/otpEmailTemplate';
 import { sendWelcomeEmail } from '../helpers/email-templates/welcomeEmailTemplate';
 import { createUploadUrl } from '../helpers/aws/s3Upload';
 import { S3UploadUrlResponse } from '../types/s3';
+import { hashOtp } from '../helpers/authCrypto';
+import { logger } from '../helpers/logger';
 
 export const getUser = protectedProcedure.query(async ({ ctx }) => {
   try {
@@ -175,18 +177,15 @@ export const emailLogin = publicProcedure
         });
       }
 
-      // Delete expired OTPs and old unverified ones
+      // Delete expired OTPs for this email
       await prisma.otp.deleteMany({
         where: {
           email,
-          OR: [
-            { expiresAt: { lt: new Date() } },
-            { verifiedAt: { not: null } },
-          ],
+          expiresAt: { lt: new Date() },
         },
       });
 
-      let otp;
+      let otp: string;
       if (!isProduction && testUser && testUser.email === email) {
         otp = testUser.otp;
       } else {
@@ -198,7 +197,7 @@ export const emailLogin = publicProcedure
       await prisma.otp.create({
         data: {
           email,
-          otp,
+          otp: hashOtp(otp),
           expiresAt,
         },
       });
@@ -211,7 +210,7 @@ export const emailLogin = publicProcedure
             content: otpEmailTemplate({ otp, to: email, exp: expiresAt }),
           });
         } catch (mailError) {
-          console.error('SMTP sending error:', mailError);
+          logger.error({ err: mailError }, 'SMTP sending error');
           throw new TRPCError({
             code: 'INTERNAL_SERVER_ERROR',
             message: `Failed to send email to ${email}`,
@@ -238,13 +237,8 @@ export const emailVerify = publicProcedure
   .mutation(async ({ input: { email, otp }, ctx: { req, res } }) => {
     try {
       const otpRecord = await prisma.otp.findFirst({
-        where: {
-          email,
-          verifiedAt: null, // Only get unverified OTPs
-        },
-        orderBy: {
-          createdAt: 'desc', // Get the most recent one
-        },
+        where: { email },
+        orderBy: { createdAt: 'desc' }, // Get the most recent one
       });
 
       if (!otpRecord) {
@@ -271,8 +265,8 @@ export const emailVerify = publicProcedure
         });
       }
 
-      // Check if OTP matches
-      if (otpRecord.otp !== otp) {
+      // Check if OTP matches (compare against stored hash)
+      if (otpRecord.otp !== hashOtp(otp)) {
         // Increment attempts
         await prisma.otp.update({
           where: { id: otpRecord.id },
@@ -284,11 +278,8 @@ export const emailVerify = publicProcedure
         });
       }
 
-      // Mark OTP as verified
-      await prisma.otp.update({
-        where: { id: otpRecord.id },
-        data: { verifiedAt: new Date() },
-      });
+      // Delete OTP record on successful verification (prevents replay)
+      await prisma.otp.delete({ where: { id: otpRecord.id } });
 
       const user = await prisma.user.findUnique({ where: { email } });
 

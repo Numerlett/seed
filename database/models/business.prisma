@@ -91,5 +91,7 @@ model BusinessMembership {
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@unique([userId, businessId])
+  @@index([businessId])
+  @@index([userId])
   @@map("business_memberships")
 }

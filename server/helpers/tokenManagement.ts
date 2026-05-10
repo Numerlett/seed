@@ -1,4 +1,5 @@
 import { prisma } from '@seed/database';
+import { logger } from './logger';
 
 /**
  * Clean up expired and old revoked refresh tokens from the database.
@@ -28,8 +29,9 @@ export async function cleanupExpiredTokens() {
       },
     });
 
-    console.log(
-      `Token cleanup completed: ${expiredResult.count} expired tokens and ${revokedResult.count} old revoked tokens removed`,
+    logger.info(
+      { expiredCount: expiredResult.count, revokedCount: revokedResult.count },
+      'Token cleanup completed',
     );
 
     return {
@@ -37,7 +39,7 @@ export async function cleanupExpiredTokens() {
       revokedCount: revokedResult.count,
     };
   } catch (error) {
-    console.error('Error cleaning up tokens:', error);
+    logger.error({ err: error }, 'Error cleaning up tokens');
     throw error;
   }
 }
@@ -61,11 +63,11 @@ export async function revokeAllUserTokens(userId: string) {
       },
     });
 
-    console.log(`Revoked ${result.count} refresh tokens for user ${userId}`);
+    logger.info({ userId, count: result.count }, 'Revoked refresh tokens');
 
     return result.count;
   } catch (error) {
-    console.error('Error revoking user tokens:', error);
+    logger.error({ err: error, userId }, 'Error revoking user tokens');
     throw error;
   }
 }
@@ -94,13 +96,14 @@ export async function revokeOtherUserTokens(
       },
     });
 
-    console.log(
-      `Revoked ${result.count} other refresh tokens for user ${userId} (kept ${currentTokenId})`,
+    logger.info(
+      { userId, count: result.count, kept: currentTokenId },
+      'Revoked other refresh tokens',
     );
 
     return result.count;
   } catch (error) {
-    console.error('Error revoking other user tokens:', error);
+    logger.error({ err: error, userId }, 'Error revoking other user tokens');
     throw error;
   }
 }
@@ -142,7 +145,7 @@ export async function getUserActiveSessions(userId: string) {
 
     return sessions;
   } catch (error) {
-    console.error('Error fetching user sessions:', error);
+    logger.error({ err: error, userId }, 'Error fetching user sessions');
     throw error;
   }
 }
@@ -169,7 +172,7 @@ export async function revokeSession(tokenId: string, userId: string) {
 
     return result.count > 0;
   } catch (error) {
-    console.error('Error revoking session:', error);
+    logger.error({ err: error }, 'Error revoking session');
     throw error;
   }
 }
@@ -187,8 +190,7 @@ export async function touchSession(tokenId: string) {
       data: { lastActiveAt: new Date() },
     });
   } catch (error) {
-    // Non-critical — don't throw, just log
-    console.error('Error updating session lastActiveAt:', error);
+    logger.warn({ err: error }, 'Error updating session lastActiveAt');
   }
 }
 
@@ -214,7 +216,7 @@ export async function findSessionByToken(
     });
     return token?.id ?? null;
   } catch (error) {
-    console.error('Error finding session by token:', error);
+    logger.error({ err: error }, 'Error finding session by token');
     return null;
   }
 }

@@ -7,7 +7,10 @@
   "scripts": {
     "build": "tsup index.ts --format cjs --out-dir dist --dts",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "keywords": [],
   "author": "",

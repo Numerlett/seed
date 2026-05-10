@@ -16,8 +16,12 @@ const envSchema = z.object({
   // Frontend
   FRONTEND_URL: z.string().url('FRONTEND_URL must be a valid URL'),
 
-  REFRESH_TOKEN_SECRET: z.string().min(1, 'REFRESH_TOKEN_SECRET is required'),
-  ACCESS_TOKEN_SECRET: z.string().min(1, 'ACCESS_TOKEN_SECRET is required'),
+  REFRESH_TOKEN_SECRET: z
+    .string()
+    .min(32, 'REFRESH_TOKEN_SECRET must be at least 32 characters'),
+  ACCESS_TOKEN_SECRET: z
+    .string()
+    .min(32, 'ACCESS_TOKEN_SECRET must be at least 32 characters'),
 
   // Token Expiry
   ACCESS_TOKEN_EXPIRY: z
@@ -77,11 +81,8 @@ export type EnvConfig = z.infer<typeof envSchema>;
 export function validateENV():
   | { success: true; data: EnvConfig }
   | { success: false; error: string } {
-  console.log('🔍 Validating environment variables...');
-
   try {
     const validatedEnv = envSchema.parse(process.env);
-    console.log('✅ Environment validation passed!\n');
     return { success: true, data: validatedEnv };
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -90,12 +91,12 @@ export function validateENV():
         .join('\n');
       return {
         success: false,
-        error: `❌ Environment validation failed:\n${errorMessage}`,
+        error: `Environment validation failed:\n${errorMessage}`,
       };
     }
     return {
       success: false,
-      error: `❌ Unexpected error during validation: ${error}`,
+      error: `Unexpected error during validation: ${error}`,
     };
   }
 }

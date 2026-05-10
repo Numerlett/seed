@@ -16,7 +16,10 @@
     "build": "tsup index.ts --format cjs --out-dir dist",
     "lint": "tsc --noEmit",
     "start": "node dist/index.js",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "keywords": [],
   "author": "",
@@ -35,6 +38,7 @@
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.4.1",
     "google-auth-library": "^10.5.0",
     "jsonwebtoken": "^9.0.3",
     "ms": "^2.1.3",

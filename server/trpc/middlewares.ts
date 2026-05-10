@@ -49,7 +49,7 @@ export const isBusinessMember = t.middleware(
     }
 
     const { businessId } = parsed.data;
-    const userId = (ctx as any).userId as string | undefined;
+    const { userId } = ctx as { userId?: string };
 
     if (!userId) {
       throw new TRPCError({
@@ -88,7 +88,7 @@ export const isBusinessMember = t.middleware(
  * Injects `adminId` and `isSuperAdmin` into context.
  */
 export const isAdmin = t.middleware(async ({ ctx, next }) => {
-  const userId = (ctx as any).userId as string | undefined;
+  const { userId } = ctx as { userId?: string };
 
   if (!userId) {
     throw new TRPCError({
@@ -123,7 +123,7 @@ export const isAdmin = t.middleware(async ({ ctx, next }) => {
  * Must be chained after `isAdmin`.
  */
 export const isSuperAdminMiddleware = t.middleware(({ ctx, next }) => {
-  const isSuperAdmin = (ctx as any).isSuperAdmin as boolean | undefined;
+  const { isSuperAdmin } = ctx as { isSuperAdmin?: boolean };
 
   if (!isSuperAdmin) {
     throw new TRPCError({

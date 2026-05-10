@@ -1,5 +1,6 @@
 import { prisma } from '@seed/database';
 import { Prisma } from '@seed/database/generated/client';
+import { TRPCError } from '@trpc/server';
 
 type Decimal = Prisma.Decimal;
 const Decimal = Prisma.Decimal;
@@ -258,9 +259,10 @@ export async function validateStockAvailability(
       return stock; // Allow negative — caller proceeds
     }
     const available = stock?.currentQuantity ?? new Decimal(0);
-    throw new Error(
-      `Insufficient stock for "${name}": available ${available.toFixed(2)}, required ${required.toFixed(2)}`,
-    );
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `Insufficient stock for "${name}": available ${available.toFixed(2)}, required ${required.toFixed(2)}`,
+    });
   }
 
   return stock;

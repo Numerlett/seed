@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { handlePrismaError } from './handlePrismaError';
+import { logger } from './logger';
 
 /**
  * Context information for error handling
@@ -90,41 +91,19 @@ function logError(
   context: ErrorContext,
   prismaInfo?: ReturnType<typeof handlePrismaError>,
 ): void {
-  const isDev = process.env.NODE_ENV !== 'production';
+  const logData: Record<string, unknown> = {
+    operation: context.operation,
+    userId: context.userId,
+    message: error.message,
+    ...(error instanceof TRPCError && { trpcCode: error.code }),
+    ...(prismaInfo?.prismaCode && {
+      prismaCode: prismaInfo.prismaCode,
+      prismaField: prismaInfo.field,
+    }),
+    cause: error.cause,
+  };
 
-  if (isDev) {
-    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.error(`❌ Error during: ${context.operation}`);
-    if (context.userId) {
-      console.error(`👤 User ID: ${context.userId}`);
-    }
-    if (error instanceof TRPCError) {
-      console.error(`📍 tRPC Code: ${error.code}`);
-      console.error(`💬 Message: ${error.message}`);
-    }
-    if (prismaInfo?.prismaCode) {
-      console.error(`🔧 Prisma Code: ${prismaInfo.prismaCode}`);
-      if (prismaInfo.field) {
-        console.error(`📝 Field: ${prismaInfo.field}`);
-      }
-      if (prismaInfo.devDetails) {
-        console.error(`🔍 Details: ${prismaInfo.devDetails}`);
-      }
-    }
-    if (error.cause) {
-      console.error('🐛 Cause:', error.cause);
-    }
-    if (error.stack && !prismaInfo) {
-      console.error('📚 Stack:', error.stack);
-    }
-    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  } else {
-    // Production: Log minimal information
-    console.error(`Error in ${context.operation}:`, error.message);
-    if (context.userId) {
-      console.error(`User: ${context.userId}`);
-    }
-  }
+  logger.error(logData, `Error during: ${context.operation}`);
 }
 
 /**

@@ -1,0 +1,14 @@
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: {
+    name: 'schemas',
+    environment: 'node',
+    include: ['tests/**/*.test.ts'],
+    coverage: {
+      provider: 'v8',
+      include: ['*.ts'],
+      exclude: ['index.ts', 'vitest.config.ts'],
+    },
+  },
+});

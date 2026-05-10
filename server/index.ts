@@ -1,6 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import cors from 'cors';
+import { rateLimit } from 'express-rate-limit';
 import { trpcExpress } from './routers';
 import cookieParser from 'cookie-parser';
 import { validateENV } from './helpers/validateENV';
@@ -28,6 +29,27 @@ app.use(
   }),
 );
 app.use(requestLogger);
+
+// Rate limiters applied to specific tRPC procedure paths
+const otpVerifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many OTP verification attempts. Try again later.' },
+});
+
+const tokenRefreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many token refresh requests. Try again later.' },
+});
+
+// Apply rate limiters before the tRPC handler for specific sub-paths
+app.use('/api/auth.emailVerify', otpVerifyLimiter);
+app.use('/api/auth.getNewAccessToken', tokenRefreshLimiter);
 
 app.get('/', (_req, res) => res.send('This is SEED server.'));
 app.get('/health', healthCheckHandler);

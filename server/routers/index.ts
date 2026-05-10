@@ -23,6 +23,7 @@ import { paymentsRoutes } from '../modules/payments/routers';
 import { manufacturingRoutes } from '../modules/manufacturing/routers';
 import { crmRoutes } from '../modules/crm/routers';
 import { reportsRoutes } from '../modules/reports/routers';
+import { communicationsRoutes } from '../modules/communications/routers';
 
 export const appRouter = t.router({
   auth: authRoutes,
@@ -46,6 +47,7 @@ export const appRouter = t.router({
   manufacturing: manufacturingRoutes,
   crm: crmRoutes,
   reports: reportsRoutes,
+  communications: communicationsRoutes,
 });
 
 export const trpcExpress = createExpressMiddleware({

@@ -1,423 +1,252 @@
 # Deployment Guide
 
-This guide covers deploying the SEED application to production environments.
+SEED uses a split deployment model:
+
+- **Frontend** → Vercel or Netlify (Next.js static/SSR)
+- **Backend** → Any Docker-capable cloud provider (Railway, Render, GCP Cloud Run, AWS ECS)
 
 ---
 
 ## Table of Contents
 
+- [Architecture Overview](#architecture-overview)
 - [Prerequisites](#prerequisites)
-- [Environment Setup](#environment-setup)
-- [Database Setup](#database-setup)
-- [Docker Deployment](#docker-deployment)
-- [Cloud Deployments](#cloud-deployments)
+- [Environment Variables](#environment-variables)
+- [Backend Deployment (Docker)](#backend-deployment-docker)
+- [Frontend Deployment (Vercel / Netlify)](#frontend-deployment-vercel--netlify)
 - [CI/CD Pipeline](#cicd-pipeline)
-- [Monitoring & Logging](#monitoring--logging)
-- [Backup & Recovery](#backup--recovery)
+- [Database Management](#database-management)
+- [Post-Deployment Checklist](#post-deployment-checklist)
+- [Rollback](#rollback)
+
+---
+
+## Architecture Overview
+
+```
+User Browser
+  │
+  ├── HTTPS → Vercel/Netlify (Next.js frontend)
+  │             │
+  │             └── tRPC over HTTP → Docker container (Express server :8080)
+  │                                    │
+  │                                    ├── PostgreSQL (managed DB)
+  │                                    ├── AWS S3 (file storage)
+  │                                    └── SMTP (email / OTP)
+  │
+  └── Google OAuth redirect → backend /api/auth.googleCallback
+```
+
+The Docker image is built from `Dockerfile.server` at the repo root. It is a multi-stage build that compiles all seven workspace packages (`database`, `schemas`, `integrations`, `jobs`, `tax`, `accounting`, `pdf`) before assembling the production runner. Migrations are applied automatically on container start via `prisma migrate deploy`.
 
 ---
 
 ## Prerequisites
 
-### Required Services
+Provision these before deploying:
 
-1. **PostgreSQL Database**
-   - Managed service recommended (AWS RDS, Supabase, Railway, Neon)
-   - Minimum: PostgreSQL 14+
-   - Connection pooling enabled
-
-2. **SMTP Email Service**
-   - SendGrid, AWS SES, or similar
-   - Authenticated SMTP credentials
-
-3. **Google OAuth** (if using social login)
-   - Google Cloud Console project
-   - OAuth 2.0 credentials configured
-
-4. **Container Registry** (for Docker deployment)
-   - Docker Hub, AWS ECR, or Google Container Registry
+| Service | Purpose | Recommended options |
+|---------|---------|---------------------|
+| PostgreSQL 14+ | Primary database | Supabase, Neon, Railway, AWS RDS |
+| AWS S3 bucket | File / document storage | AWS S3 |
+| SMTP relay | OTP emails | AWS SES, SendGrid, Postmark |
+| Google OAuth app | Social login | Google Cloud Console |
+| Container registry | Docker image storage | Docker Hub, AWS ECR, GCP Artifact Registry |
 
 ---
 
-## Environment Setup
+## Environment Variables
 
-### Production Environment Variables
+### Server
 
-#### Server (`server/.env`)
+All variables are validated at startup via Zod. The server will refuse to start if any required variable is missing or malformed.
 
 ```env
-# Database
-DATABASE_URL="postgresql://user:password@db-host:5432/seed_prod"
-
-# Server Configuration
+# Server
 PORT=8080
 NODE_ENV=production
 FRONTEND_URL=https://yourdomain.com
 
-# Security - Generate strong secrets
-# openssl rand -base64 64
-ACCESS_TOKEN_SECRET=your_very_long_random_access_token_secret_here
-REFRESH_TOKEN_SECRET=your_very_long_random_refresh_token_secret_here
+# Auth secrets — generate with: openssl rand -base64 64
+ACCESS_TOKEN_SECRET=<min 32 chars>
+REFRESH_TOKEN_SECRET=<min 32 chars>
+ACCESS_TOKEN_EXPIRY=15m
+REFRESH_TOKEN_EXPIRY=7d
 
-# Email Service
-EMAIL_HOST=smtp.sendgrid.net
-EMAIL_PORT=587
-EMAIL_USER=apikey
-EMAIL_PASSWORD=your_sendgrid_api_key
-EMAIL_FROM=noreply@yourdomain.com
+# Database
+DATABASE_URL=postgresql://user:password@host:5432/seed_prod
 
 # Google OAuth
-GOOGLE_CLIENT_ID=your_google_client_id.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=your_google_client_secret
-GOOGLE_REDIRECT_URI=https://api.yourdomain.com/api/auth.googleCallback
+GOOGLE_CLIENT_ID=<from Google Cloud Console>
+GOOGLE_CLIENT_SECRET=<from Google Cloud Console>
 
-# DO NOT SET THESE IN PRODUCTION
-# TEST_USER_EMAIL=
-# TEST_USER_OTP=
+# Email (SMTP)
+SMTP_HOST=email-smtp.ap-south-1.amazonaws.com
+SMTP_PORT=587
+SMTP_USERNAME=<SMTP username / API key>
+SMTP_PASSWORD=<SMTP password>
+SMTP_MAIL=noreply@yourdomain.com
+
+# AWS S3
+AWS_REGION=ap-south-1
+AWS_ACCESS_KEY_ID=<IAM key>
+AWS_SECRET_ACCESS_KEY=<IAM secret>
+AWS_S3_BUCKET_NAME=<bucket name>
+
+# DO NOT SET IN PRODUCTION:
+# TEST_MAIL=
+# TEST_OTP=
 ```
 
-#### Web (`web/.env.production`)
+### Frontend (Web)
 
 ```env
+# .env.production or Vercel/Netlify dashboard
 NEXT_PUBLIC_SERVER_BASE_URL=https://api.yourdomain.com
+NEXT_PUBLIC_AWS_S3_BUCKET_NAME=<same bucket as server>
+NEXT_PUBLIC_AWS_REGION=<same region as server>
 ```
 
-### Security Checklist
-
-- [ ] Strong JWT secrets (64+ characters)
-- [ ] Secure database password
-- [ ] HTTPS enabled on all domains
-- [ ] Environment variables not in source control
-- [ ] API keys rotated from defaults
-- [ ] Test user credentials removed
-- [ ] CORS configured for production domain only
+> `NEXT_PUBLIC_AWS_S3_BUCKET_NAME` and `NEXT_PUBLIC_AWS_REGION` are used by `next.config.ts` to allowlist S3 image domains.
 
 ---
 
-## Database Setup
+## Backend Deployment (Docker)
 
-### 1. Create Production Database
+### 1. Build the image
 
-**Using Supabase:**
-
-```bash
-# Create project at supabase.com
-# Copy connection string from Settings > Database
-DATABASE_URL="postgresql://postgres:[password]@db.[project].supabase.co:5432/postgres"
-```
-
-**Using Railway:**
+From the repo root:
 
 ```bash
-# Create project and PostgreSQL service at railway.app
-# Copy DATABASE_URL from service variables
-```
-
-**Using AWS RDS:**
-
-```bash
-# Create PostgreSQL instance in AWS Console
-# Enable automatic backups
-# Configure security groups for access
-DATABASE_URL="postgresql://username:password@instance.region.rds.amazonaws.com:5432/seeddb"
-```
-
-### 2. Run Migrations
-
-```bash
-# Set DATABASE_URL environment variable
-export DATABASE_URL="postgresql://..."
-
-# Deploy migrations (no interactive prompts)
-pnpm --filter @seed/database db:deploy
-
-# Verify with Prisma Studio (optional)
-pnpm --filter @seed/database db:studio
-```
-
-### 3. Connection Pooling
-
-For production, use connection pooling:
-
-**Prisma Configuration:**
-
-```prisma
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-  // Add connection pooling
-  relationMode = "prisma"
-}
-```
-
-**PgBouncer (Recommended for high traffic):**
-
-```bash
-# Use pooled connection URL
-DATABASE_URL="postgresql://user:pass@pooler.region.supabase.co:6543/postgres"
-```
-
----
-
-## Docker Deployment
-
-### Build Production Image
-
-```bash
-# Build server image
 docker build -t seed-server:latest -f Dockerfile.server .
-
-# Tag for registry
-docker tag seed-server:latest your-registry/seed-server:v1.0.0
-
-# Push to registry
-docker push your-registry/seed-server:v1.0.0
 ```
 
-### Docker Compose Production
+The build compiles all workspace packages in dependency order and produces a lean runner image with only production dependencies.
 
-**`docker-compose.prod.yml`:**
+### 2. Push to a container registry
+
+```bash
+# Docker Hub
+docker tag seed-server:latest youruser/seed-server:v1.0.0
+docker push youruser/seed-server:v1.0.0
+
+# AWS ECR
+aws ecr get-login-password --region ap-south-1 | \
+  docker login --username AWS --password-stdin ACCOUNT.dkr.ecr.ap-south-1.amazonaws.com
+docker tag seed-server:latest ACCOUNT.dkr.ecr.ap-south-1.amazonaws.com/seed-server:v1.0.0
+docker push ACCOUNT.dkr.ecr.ap-south-1.amazonaws.com/seed-server:v1.0.0
+```
+
+### 3. Run the container
+
+The container automatically runs `prisma migrate deploy` before starting the server.
+
+```bash
+docker run -d \
+  --name seed-server \
+  -p 8080:8080 \
+  --env-file .env \
+  --restart unless-stopped \
+  seed-server:latest
+```
+
+Or via Docker Compose (`docker-compose.prod.yml` at repo root):
 
 ```yaml
-version: '3.8'
-
 services:
-  postgres:
-    image: postgres:16-alpine
-    restart: always
-    environment:
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      POSTGRES_DB: ${DB_NAME}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./backups:/backups
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER}']
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   server:
-    image: your-registry/seed-server:v1.0.0
-    restart: always
+    image: youruser/seed-server:latest
+    restart: unless-stopped
     ports:
-      - '8080:8080'
-    environment:
-      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
-      PORT: 8080
-      NODE_ENV: production
-      FRONTEND_URL: ${FRONTEND_URL}
-      ACCESS_TOKEN_SECRET: ${ACCESS_TOKEN_SECRET}
-      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET}
-      EMAIL_HOST: ${EMAIL_HOST}
-      EMAIL_PORT: ${EMAIL_PORT}
-      EMAIL_USER: ${EMAIL_USER}
-      EMAIL_PASSWORD: ${EMAIL_PASSWORD}
-      EMAIL_FROM: ${EMAIL_FROM}
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - "8080:8080"
+    env_file: .env
     healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:8080/health']
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8080/health', r => process.exit(r.statusCode === 200 ? 0 : 1))"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
+      start_period: 15s
       retries: 3
-
-volumes:
-  postgres_data:
-    driver: local
-
-networks:
-  default:
-    driver: bridge
 ```
-
-**Deploy:**
 
 ```bash
-# Create .env file with production values
-cp .env.example .env
-nano .env
-
-# Start services
-docker-compose -f docker-compose.prod.yml up -d
-
-# View logs
-docker-compose -f docker-compose.prod.yml logs -f
-
-# Stop services
-docker-compose -f docker-compose.prod.yml down
+docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml logs -f
 ```
+
+### Cloud provider options
+
+#### Railway
+
+1. New project → Deploy from Docker image (or link GitHub repo)
+2. Set root directory `/`, build command uses the `Dockerfile.server`
+3. Add all server env vars in the Railway variables tab
+4. Railway auto-provisions a public HTTPS URL — use that as `FRONTEND_URL` value on the Vercel side
+
+#### Render
+
+1. New Web Service → Docker
+2. Dockerfile path: `Dockerfile.server`
+3. Port: `8080`
+4. Add env vars in the Environment tab
+5. Enable "Auto-Deploy" on push to `main`
+
+#### GCP Cloud Run
+
+```bash
+gcloud run deploy seed-server \
+  --image REGION-docker.pkg.dev/PROJECT/seed/seed-server:latest \
+  --platform managed \
+  --region asia-south1 \
+  --port 8080 \
+  --set-env-vars NODE_ENV=production,PORT=8080,FRONTEND_URL=https://yourdomain.com \
+  --set-secrets DATABASE_URL=seed-db-url:latest,ACCESS_TOKEN_SECRET=seed-access-secret:latest
+```
+
+#### AWS ECS (Fargate)
+
+1. Push image to ECR (step 2 above)
+2. Create ECS task definition — container port `8080`, pass secrets via AWS Secrets Manager
+3. Create ECS service with Application Load Balancer
+4. Point Route 53 / CNAME to the ALB DNS
 
 ---
 
-## Cloud Deployments
+## Frontend Deployment (Vercel / Netlify)
 
-### Vercel (Frontend)
+### Vercel (recommended for Next.js)
 
-1. **Install Vercel CLI:**
-
-   ```bash
-   npm install -g vercel
+1. Import the repo in the [Vercel dashboard](https://vercel.com/new)
+2. Set **Root Directory** to `web`
+3. Framework preset: **Next.js** (auto-detected)
+4. Add environment variables:
    ```
-
-2. **Deploy:**
-
-   ```bash
-   cd web
-   vercel --prod
+   NEXT_PUBLIC_SERVER_BASE_URL=https://api.yourdomain.com
+   NEXT_PUBLIC_AWS_S3_BUCKET_NAME=<bucket>
+   NEXT_PUBLIC_AWS_REGION=<region>
    ```
+5. Deploy. Every push to `main` redeploys automatically.
 
-3. **Configure Environment Variables:**
-   - Go to Vercel Dashboard → Project → Settings → Environment Variables
-   - Add: `NEXT_PUBLIC_SERVER_BASE_URL=https://api.yourdomain.com`
+**Custom domain:** Vercel Dashboard → Project → Settings → Domains → Add domain → follow DNS instructions.
 
-4. **Configure Domain:**
-   - Add custom domain in Vercel dashboard
-   - Update DNS records as instructed
+### Netlify
 
-### Railway (Backend + Database)
+1. New site → Import from Git → select repo
+2. Set **Base directory** to `web`
+3. Build command: `pnpm build`
+4. Publish directory: `.next`
+5. Add the same three env vars above in Site Settings → Environment Variables
+6. Enable the [Netlify Next.js plugin](https://docs.netlify.com/integrations/frameworks/next-js/overview/) for SSR support
 
-1. **Create Project:**
-   - Go to railway.app
-   - Create new project from GitHub repo
-
-2. **Add PostgreSQL:**
-   - Add PostgreSQL service
-   - Copy `DATABASE_URL` from variables
-
-3. **Deploy Server:**
-   - Add service from repo
-   - Set root directory: `/`
-   - Set build command: `pnpm install && pnpm build`
-   - Set start command: `pnpm --filter @seed/server start`
-
-4. **Environment Variables:**
-
-   ```
-   DATABASE_URL=${{Postgres.DATABASE_URL}}
-   PORT=8080
-   NODE_ENV=production
-   FRONTEND_URL=https://yourdomain.com
-   ACCESS_TOKEN_SECRET=...
-   REFRESH_TOKEN_SECRET=...
-   EMAIL_HOST=...
-   EMAIL_PORT=...
-   EMAIL_USER=...
-   EMAIL_PASSWORD=...
-   EMAIL_FROM=...
-   ```
-
-5. **Custom Domain:**
-   - Settings → Networking → Custom Domain
-   - Add domain and configure DNS
-
-### Google Cloud Run
-
-1. **Build and Push Image:**
-
-   ```bash
-   # Build
-   docker build -t gcr.io/PROJECT_ID/seed-server:v1.0.0 -f Dockerfile.server .
-
-   # Push
-   docker push gcr.io/PROJECT_ID/seed-server:v1.0.0
-   ```
-
-2. **Deploy:**
-
-   ```bash
-   gcloud run deploy seed-server \
-     --image gcr.io/PROJECT_ID/seed-server:v1.0.0 \
-     --platform managed \
-     --region us-central1 \
-     --allow-unauthenticated \
-     --port 8080 \
-     --set-env-vars DATABASE_URL="postgresql://..." \
-     --set-env-vars NODE_ENV=production \
-     --set-env-vars FRONTEND_URL="https://yourdomain.com"
-   ```
-
-3. **Add Secrets (Recommended):**
-
-   ```bash
-   # Store secrets in Secret Manager
-   echo -n "your-secret" | gcloud secrets create access-token-secret --data-file=-
-
-   # Reference in Cloud Run
-   gcloud run deploy seed-server \
-     --update-secrets ACCESS_TOKEN_SECRET=access-token-secret:latest
-   ```
-
-### AWS (ECS + RDS)
-
-1. **Create RDS Instance:**
-   - PostgreSQL 14+
-   - Enable automatic backups
-   - Configure security groups
-
-2. **Build and Push to ECR:**
-
-   ```bash
-   # Login to ECR
-   aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com
-
-   # Tag and push
-   docker tag seed-server:latest ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/seed-server:latest
-   docker push ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/seed-server:latest
-   ```
-
-3. **Create ECS Task Definition:**
-
-   ```json
-   {
-     "family": "seed-server",
-     "networkMode": "awsvpc",
-     "containerDefinitions": [
-       {
-         "name": "seed-server",
-         "image": "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/seed-server:latest",
-         "portMappings": [
-           {
-             "containerPort": 8080,
-             "protocol": "tcp"
-           }
-         ],
-         "environment": [
-           { "name": "PORT", "value": "8080" },
-           { "name": "NODE_ENV", "value": "production" }
-         ],
-         "secrets": [
-           {
-             "name": "DATABASE_URL",
-             "valueFrom": "arn:aws:secretsmanager:..."
-           },
-           {
-             "name": "ACCESS_TOKEN_SECRET",
-             "valueFrom": "arn:aws:secretsmanager:..."
-           }
-         ]
-       }
-     ]
-   }
-   ```
-
-4. **Deploy Service:**
-   - Create ECS service with task definition
-   - Configure Application Load Balancer
-   - Set up auto-scaling
+**CORS note:** `FRONTEND_URL` on the server must exactly match the deployed frontend origin (no trailing slash). Update this env var after you know your Vercel/Netlify URL.
 
 ---
 
 ## CI/CD Pipeline
 
-### GitHub Actions
-
-**`.github/workflows/deploy.yml`:**
+### GitHub Actions — `.github/workflows/deploy.yml`
 
 ```yaml
-name: Deploy to Production
+name: Deploy
 
 on:
   push:
@@ -425,312 +254,148 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  build-and-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
+      - uses: pnpm/action-setup@v4
         with:
-          node-version: '20'
+          version: latest
 
-      - name: Install pnpm
-        run: npm install -g pnpm
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
 
-      - name: Install dependencies
-        run: pnpm install
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm build
 
-      - name: Type check
-        run: pnpm lint
-
-      - name: Build packages
-        run: pnpm build
-
-  deploy-server:
-    needs: test
+  deploy-backend:
+    needs: build-and-test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Build Docker image
         run: docker build -t seed-server:${{ github.sha }} -f Dockerfile.server .
 
-      - name: Push to registry
+      - name: Push to Docker Hub
         run: |
-          echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
           docker tag seed-server:${{ github.sha }} ${{ secrets.DOCKER_USERNAME }}/seed-server:latest
           docker push ${{ secrets.DOCKER_USERNAME }}/seed-server:latest
 
-      - name: Deploy to server
-        uses: appleboy/ssh-action@master
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             docker pull ${{ secrets.DOCKER_USERNAME }}/seed-server:latest
-            docker stop seed || true
-            docker rm seed || true
+            docker stop seed-server || true
+            docker rm seed-server || true
             docker run -d \
-              --name seed \
+              --name seed-server \
               -p 8080:8080 \
-              --env-file /home/user/.env \
+              --env-file /home/deploy/.env \
+              --restart unless-stopped \
               ${{ secrets.DOCKER_USERNAME }}/seed-server:latest
 
   deploy-frontend:
-    needs: test
+    needs: build-and-test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Deploy to Vercel
-        uses: amondnet/vercel-action@v20
+        uses: amondnet/vercel-action@v25
         with:
           vercel-token: ${{ secrets.VERCEL_TOKEN }}
           vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          vercel-args: '--prod'
+          vercel-args: "--prod"
           working-directory: ./web
 ```
 
----
+**Required GitHub secrets:**
 
-## Monitoring & Logging
-
-### Application Monitoring
-
-**Add health check endpoint:**
-
-```typescript
-// server/index.ts
-app.get('/health', (_req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: Date.now(),
-    uptime: process.uptime(),
-  });
-});
-```
-
-**Monitoring Tools:**
-
-- **Uptime Robot**: Free uptime monitoring
-- **Sentry**: Error tracking and performance
-- **LogRocket**: Session replay
-- **Datadog**: Full observability platform
-
-### Logging
-
-**Winston Logger Setup:**
-
-```typescript
-// server/helpers/logger.ts
-import winston from 'winston';
-
-export const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
-  format: winston.format.json(),
-  transports: [
-    new winston.transports.File({ filename: 'error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'combined.log' }),
-  ],
-});
-
-if (process.env.NODE_ENV !== 'production') {
-  logger.add(
-    new winston.transports.Console({
-      format: winston.format.simple(),
-    }),
-  );
-}
-```
-
-**Usage:**
-
-```typescript
-import { logger } from './helpers/logger';
-
-logger.info('User logged in', { userId: user.id });
-logger.error('Database connection failed', { error: err.message });
-```
+| Secret | Description |
+|--------|-------------|
+| `DOCKER_USERNAME` | Docker Hub username |
+| `DOCKER_PASSWORD` | Docker Hub password / token |
+| `SERVER_HOST` | IP or hostname of your server |
+| `SERVER_USER` | SSH user |
+| `SSH_PRIVATE_KEY` | SSH private key for server access |
+| `VERCEL_TOKEN` | Vercel API token |
+| `VERCEL_ORG_ID` | Vercel org ID |
+| `VERCEL_PROJECT_ID` | Vercel project ID |
 
 ---
 
-## Backup & Recovery
+## Database Management
 
-### Database Backups
+### Run migrations
 
-**Automated Daily Backups:**
-
-```bash
-#!/bin/bash
-# backup.sh
-
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_DIR="/backups"
-DATABASE_URL="postgresql://user:pass@host:5432/dbname"
-
-pg_dump $DATABASE_URL > $BACKUP_DIR/backup_$DATE.sql
-
-# Keep only last 30 days
-find $BACKUP_DIR -name "backup_*.sql" -mtime +30 -delete
-```
-
-**Cron Job:**
+Migrations run automatically on container start. To run them manually:
 
 ```bash
-# Run daily at 2 AM
-0 2 * * * /path/to/backup.sh
+# Against a remote DB
+DATABASE_URL="postgresql://..." pnpm --filter @seed/database db:deploy
 ```
 
-**Restore from Backup:**
+### Rollback a migration
 
 ```bash
-psql $DATABASE_URL < backup_20251218_020000.sql
+# Mark a specific migration as rolled back (does not auto-revert schema)
+DATABASE_URL="postgresql://..." pnpm --filter @seed/database exec prisma migrate resolve \
+  --rolled-back 20240101000000_migration_name
+# Then restore from backup and re-deploy the previous image
 ```
 
-### Disaster Recovery Plan
-
-1. **Regular Backups**: Automated daily backups
-2. **Off-site Storage**: S3 or equivalent
-3. **Test Restores**: Monthly restore tests
-4. **Documentation**: Recovery procedures documented
-5. **Monitoring**: Alerts for backup failures
-
----
-
-## Performance Optimization
-
-### Database Optimization
-
-```sql
--- Add indexes for frequently queried fields
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_businesses_owner ON businesses(owner_id);
-CREATE INDEX idx_refresh_tokens_user ON refresh_tokens(user_id);
-CREATE INDEX idx_refresh_tokens_token ON refresh_tokens(token);
-
--- Analyze query performance
-EXPLAIN ANALYZE SELECT * FROM users WHERE email = 'test@example.com';
-```
-
-### CDN Configuration
-
-Use CloudFlare or similar:
-
-- Cache static assets
-- DDoS protection
-- SSL/TLS
-- Edge caching
-
-### Load Balancing
-
-For high traffic:
-
-- Multiple server instances
-- Load balancer (Nginx, AWS ALB)
-- Session affinity for WebSocket
-
----
-
-## Security Hardening
-
-### HTTPS Configuration
-
-**Nginx Reverse Proxy:**
-
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name api.yourdomain.com;
-
-    ssl_certificate /etc/letsencrypt/live/api.yourdomain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/api.yourdomain.com/privkey.pem;
-
-    # Security headers
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    add_header X-Frame-Options "DENY" always;
-    add_header X-Content-Type-Options "nosniff" always;
-
-    location / {
-        proxy_pass http://localhost:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
-```
-
-### Rate Limiting
-
-```typescript
-// Add rate limiting middleware
-import rateLimit from 'express-rate-limit';
-
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-});
-
-app.use('/api', limiter);
-```
-
----
-
-## Rollback Procedures
-
-### Quick Rollback
+### Backups
 
 ```bash
-# Revert to previous Docker image
-docker pull your-registry/seed-server:v1.0.0
-docker stop seed && docker rm seed
-docker run -d --name seed -p 8080:8080 --env-file .env your-registry/seed-server:v1.0.0
+# Dump
+pg_dump "$DATABASE_URL" > backup_$(date +%Y%m%d_%H%M%S).sql
 
-# Or with docker-compose
-docker-compose -f docker-compose.prod.yml down
-# Edit image version in compose file
-docker-compose -f docker-compose.prod.yml up -d
+# Restore
+psql "$DATABASE_URL" < backup_20260101_020000.sql
 ```
 
-### Database Rollback
-
-```bash
-# Revert last migration
-pnpm --filter @seed/database prisma migrate resolve --rolled-back MIGRATION_NAME
-
-# Restore from backup if needed
-psql $DATABASE_URL < backup_20251218_020000.sql
-```
+Use managed-DB automatic backups (Supabase/Neon/RDS all support point-in-time recovery) rather than manual dumps for production.
 
 ---
 
 ## Post-Deployment Checklist
 
-- [ ] All services running and healthy
-- [ ] Database migrations applied
-- [ ] Environment variables configured
-- [ ] HTTPS working correctly
-- [ ] CORS configured for production domain
-- [ ] Email sending working (test OTP)
-- [ ] Google OAuth working (if enabled)
-- [ ] Monitoring alerts configured
-- [ ] Backup system running
-- [ ] Performance acceptable (check metrics)
-- [ ] Error tracking configured
-- [ ] Documentation updated
+- [ ] Server `/health` returns `200`
+- [ ] Database migrations applied (`prisma migrate status`)
+- [ ] All required env vars set (server exits on startup if any are missing)
+- [ ] HTTPS working on both frontend and backend URLs
+- [ ] `FRONTEND_URL` on server matches actual frontend origin exactly
+- [ ] CORS: test that frontend can reach `/api` without errors
+- [ ] OTP email sending works (trigger a login)
+- [ ] Google OAuth redirect URI registered in Google Cloud Console (`https://api.yourdomain.com/api/auth.googleCallback`)
+- [ ] S3 bucket CORS policy allows uploads from the frontend origin
+- [ ] `TEST_MAIL` and `TEST_OTP` are **not** set in production
+- [ ] Rate limiters active (OTP: 10 req/15 min, token refresh: 30 req/15 min)
 
 ---
 
-## Support
+## Rollback
 
-For deployment issues:
+### Backend
 
-- Check server logs: `docker logs seed`
-- Verify environment variables
-- Test database connectivity
-- Check firewall/security group rules
-- Review monitoring dashboards
+```bash
+# Roll back to a specific image tag
+docker stop seed-server && docker rm seed-server
+docker run -d --name seed-server -p 8080:8080 --env-file .env \
+  youruser/seed-server:v1.0.0
+```
+
+### Frontend
+
+Vercel and Netlify both keep a deployment history. Go to the dashboard → Deployments → pick a previous build → **Promote to production**.
