@@ -68,6 +68,16 @@ const envSchema = z.object({
   AWS_SECRET_ACCESS_KEY: z.string().min(1, 'AWS_SECRET_ACCESS_KEY is required'),
   AWS_S3_BUCKET_NAME: z.string().min(1, 'AWS_S3_BUCKET_NAME is required'),
 
+  // Redis (BullMQ job queues)
+  REDIS_URL: z
+    .string()
+    .url('REDIS_URL must be a valid URL')
+    .refine(
+      (url) => url.startsWith('redis://') || url.startsWith('rediss://'),
+      'REDIS_URL must start with "redis://" or "rediss://"',
+    )
+    .default('redis://localhost:6379'),
+
   // Optional Test Configuration
   TEST_MAIL: z.string().email('TEST_MAIL must be a valid email').optional(),
   TEST_OTP: z
