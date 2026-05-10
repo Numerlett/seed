@@ -16,6 +16,7 @@ SEED is built as a **monorepo** using **pnpm workspaces**, with clear separation
 - **OAuth**: Google OAuth 2.0 integration
 - **Type Safety**: TypeScript throughout the entire stack
 - **Containerization**: Docker support for server deployment
+- **Deployment modes**: `long-running` (Redis + BullMQ workers) or `serverless` (no Redis, no workers, scheduled features disabled). Selected via `DEPLOYMENT_MODE` env. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#deployment-modes).
 
 ---
 

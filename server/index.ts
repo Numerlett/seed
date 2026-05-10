@@ -18,6 +18,11 @@ if (!envValidation.success) {
   process.exit(1);
 }
 
+logger.info(
+  { deploymentMode: envValidation.data.DEPLOYMENT_MODE },
+  `Booting in ${envValidation.data.DEPLOYMENT_MODE} mode`,
+);
+
 const app = express();
 
 app.use(express.json());

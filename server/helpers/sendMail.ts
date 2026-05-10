@@ -1,5 +1,10 @@
-import nodemailer from 'nodemailer';
+import { sendEmailDirect } from '@seed/integrations';
 
+/**
+ * Backwards-compatible inline email sender.
+ * For new feature code, prefer `sendEmail` from `server/lib/dispatch` so the
+ * caller stays mode-agnostic (inline in serverless, queued in long-running).
+ */
 export default async function sendMail({
   to,
   subject,
@@ -9,30 +14,5 @@ export default async function sendMail({
   subject: string;
   content: string;
 }) {
-  const host = process.env.SMTP_HOST;
-  const user = process.env.SMTP_USERNAME;
-  const pass = process.env.SMTP_PASSWORD;
-  const port = Number(process.env.SMTP_PORT);
-  const mail = process.env.SMTP_MAIL;
-
-  if (!host || !user || !pass || !port || !mail) {
-    throw new Error('SMTP configuration is incomplete');
-  }
-
-  const transporter = nodemailer.createTransport({
-    host,
-    port,
-    secure: false,
-    auth: {
-      user,
-      pass,
-    },
-  });
-
-  await transporter.sendMail({
-    from: `"SEED" <${mail}>`,
-    to,
-    subject,
-    html: content,
-  });
+  await sendEmailDirect({ to, subject, html: content });
 }

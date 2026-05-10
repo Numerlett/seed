@@ -3,88 +3,110 @@ import { z } from 'zod';
 
 dotenv.config();
 
-const envSchema = z.object({
-  // Server
-  PORT: z
-    .string()
-    .min(1, 'PORT is required')
-    .regex(/^\d+$/, 'PORT must be a valid number'),
-  NODE_ENV: z
-    .enum(['development', 'production', 'test'])
-    .default('development'),
+const envSchema = z
+  .object({
+    // Server
+    PORT: z
+      .string()
+      .min(1, 'PORT is required')
+      .regex(/^\d+$/, 'PORT must be a valid number'),
+    NODE_ENV: z
+      .enum(['development', 'production', 'test'])
+      .default('development'),
 
-  // Frontend
-  FRONTEND_URL: z.string().url('FRONTEND_URL must be a valid URL'),
+    // Deployment mode — controls whether long-running features (BullMQ workers,
+    // scheduled jobs, Redis-backed queues) are enabled. Serverless mode runs
+    // queueable work inline and rejects long-running-only features.
+    DEPLOYMENT_MODE: z
+      .enum(['serverless', 'long-running'])
+      .default('long-running'),
 
-  REFRESH_TOKEN_SECRET: z
-    .string()
-    .min(32, 'REFRESH_TOKEN_SECRET must be at least 32 characters'),
-  ACCESS_TOKEN_SECRET: z
-    .string()
-    .min(32, 'ACCESS_TOKEN_SECRET must be at least 32 characters'),
+    // Frontend
+    FRONTEND_URL: z.string().url('FRONTEND_URL must be a valid URL'),
 
-  // Token Expiry
-  ACCESS_TOKEN_EXPIRY: z
-    .string()
-    .regex(
-      /^\d+[smhd]$/,
-      'ACCESS_TOKEN_EXPIRY must be in format like "15m", "1h", "7d"',
-    )
-    .default('15m'),
-  REFRESH_TOKEN_EXPIRY: z
-    .string()
-    .regex(
-      /^\d+[smhd]$/,
-      'REFRESH_TOKEN_EXPIRY must be in format like "15m", "1h", "7d"',
-    )
-    .default('7d'),
+    REFRESH_TOKEN_SECRET: z
+      .string()
+      .min(32, 'REFRESH_TOKEN_SECRET must be at least 32 characters'),
+    ACCESS_TOKEN_SECRET: z
+      .string()
+      .min(32, 'ACCESS_TOKEN_SECRET must be at least 32 characters'),
 
-  // Database
-  DATABASE_URL: z
-    .string()
-    .url('DATABASE_URL must be a valid URL')
-    .refine(
-      (url) => url.startsWith('postgresql://') || url.startsWith('postgres://'),
-      'DATABASE_URL must start with "postgresql://" or "postgres://"',
-    ),
+    // Token Expiry
+    ACCESS_TOKEN_EXPIRY: z
+      .string()
+      .regex(
+        /^\d+[smhd]$/,
+        'ACCESS_TOKEN_EXPIRY must be in format like "15m", "1h", "7d"',
+      )
+      .default('15m'),
+    REFRESH_TOKEN_EXPIRY: z
+      .string()
+      .regex(
+        /^\d+[smhd]$/,
+        'REFRESH_TOKEN_EXPIRY must be in format like "15m", "1h", "7d"',
+      )
+      .default('7d'),
 
-  // Google OAuth
-  GOOGLE_CLIENT_ID: z.string().min(1, 'GOOGLE_CLIENT_ID is required'),
-  GOOGLE_CLIENT_SECRET: z.string().min(1, 'GOOGLE_CLIENT_SECRET is required'),
+    // Database
+    DATABASE_URL: z
+      .string()
+      .url('DATABASE_URL must be a valid URL')
+      .refine(
+        (url) =>
+          url.startsWith('postgresql://') || url.startsWith('postgres://'),
+        'DATABASE_URL must start with "postgresql://" or "postgres://"',
+      ),
 
-  // Email Configuration
-  SMTP_USERNAME: z.string().min(1, 'SMTP_USERNAME is required'),
-  SMTP_PASSWORD: z.string().min(1, 'SMTP_PASSWORD is required'),
-  SMTP_PORT: z
-    .string()
-    .regex(/^\d+$/, 'SMTP_PORT must be a valid number')
-    .default('587'),
-  SMTP_HOST: z.string().min(1, 'SMTP_HOST is required'),
-  SMTP_MAIL: z.string().email('SMTP_MAIL must be a valid email'),
+    // Google OAuth
+    GOOGLE_CLIENT_ID: z.string().min(1, 'GOOGLE_CLIENT_ID is required'),
+    GOOGLE_CLIENT_SECRET: z.string().min(1, 'GOOGLE_CLIENT_SECRET is required'),
 
-  // AWS S3 Configuration
-  AWS_REGION: z.string().min(1, 'AWS_REGION is required'),
-  AWS_ACCESS_KEY_ID: z.string().min(1, 'AWS_ACCESS_KEY_ID is required'),
-  AWS_SECRET_ACCESS_KEY: z.string().min(1, 'AWS_SECRET_ACCESS_KEY is required'),
-  AWS_S3_BUCKET_NAME: z.string().min(1, 'AWS_S3_BUCKET_NAME is required'),
+    // Email Configuration
+    SMTP_USERNAME: z.string().min(1, 'SMTP_USERNAME is required'),
+    SMTP_PASSWORD: z.string().min(1, 'SMTP_PASSWORD is required'),
+    SMTP_PORT: z
+      .string()
+      .regex(/^\d+$/, 'SMTP_PORT must be a valid number')
+      .default('587'),
+    SMTP_HOST: z.string().min(1, 'SMTP_HOST is required'),
+    SMTP_MAIL: z.string().email('SMTP_MAIL must be a valid email'),
 
-  // Redis (BullMQ job queues)
-  REDIS_URL: z
-    .string()
-    .url('REDIS_URL must be a valid URL')
-    .refine(
-      (url) => url.startsWith('redis://') || url.startsWith('rediss://'),
-      'REDIS_URL must start with "redis://" or "rediss://"',
-    )
-    .default('redis://localhost:6379'),
+    // AWS S3 Configuration
+    AWS_REGION: z.string().min(1, 'AWS_REGION is required'),
+    AWS_ACCESS_KEY_ID: z.string().min(1, 'AWS_ACCESS_KEY_ID is required'),
+    AWS_SECRET_ACCESS_KEY: z
+      .string()
+      .min(1, 'AWS_SECRET_ACCESS_KEY is required'),
+    AWS_S3_BUCKET_NAME: z.string().min(1, 'AWS_S3_BUCKET_NAME is required'),
 
-  // Optional Test Configuration
-  TEST_MAIL: z.string().email('TEST_MAIL must be a valid email').optional(),
-  TEST_OTP: z
-    .string()
-    .regex(/^\d+$/, 'TEST_OTP must contain only digits')
-    .optional(),
-});
+    // Redis (BullMQ job queues) — required only in long-running mode.
+    // Serverless deployments must omit it; presence is ignored.
+    REDIS_URL: z
+      .string()
+      .url('REDIS_URL must be a valid URL')
+      .refine(
+        (url) => url.startsWith('redis://') || url.startsWith('rediss://'),
+        'REDIS_URL must start with "redis://" or "rediss://"',
+      )
+      .optional(),
+
+    // Optional Test Configuration
+    TEST_MAIL: z.string().email('TEST_MAIL must be a valid email').optional(),
+    TEST_OTP: z
+      .string()
+      .regex(/^\d+$/, 'TEST_OTP must contain only digits')
+      .optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.DEPLOYMENT_MODE === 'long-running' && !data.REDIS_URL) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['REDIS_URL'],
+        message:
+          'REDIS_URL is required when DEPLOYMENT_MODE is "long-running"',
+      });
+    }
+  });
 
 export type EnvConfig = z.infer<typeof envSchema>;
 

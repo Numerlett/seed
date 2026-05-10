@@ -125,6 +125,9 @@ importers:
       dotenv:
         specifier: ^17.3.1
         version: 17.3.1
+      nodemailer:
+        specifier: ^7.0.13
+        version: 7.0.13
       zod:
         specifier: ^3.25.76
         version: 3.25.76
@@ -132,6 +135,9 @@ importers:
       '@types/node':
         specifier: ^25.2.3
         version: 25.2.3
+      '@types/nodemailer':
+        specifier: ^7.0.10
+        version: 7.0.10
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(jiti@2.6.1)(postcss@8.5.10)(tsx@4.21.0)(typescript@5.9.3)
@@ -234,9 +240,15 @@ importers:
       '@seed/database':
         specifier: workspace:*
         version: link:../database
+      '@seed/integrations':
+        specifier: workspace:*
+        version: link:../integrations
       '@seed/jobs':
         specifier: workspace:*
         version: link:../jobs
+      '@seed/pdf':
+        specifier: workspace:*
+        version: link:../pdf
       '@seed/schemas':
         specifier: workspace:*
         version: link:../schemas

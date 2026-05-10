@@ -1,3 +1,4 @@
+import { TRPCError } from '@trpc/server';
 import { t } from './index';
 import {
   isAuthed,
@@ -9,6 +10,22 @@ import {
 export const publicProcedure = t.procedure;
 
 export const protectedProcedure = t.procedure.use(isAuthed);
+
+/**
+ * Procedure for features that require the long-running deployment
+ * (BullMQ workers / scheduled jobs). Rejects calls with NOT_IMPLEMENTED
+ * when DEPLOYMENT_MODE=serverless. Chain after isAuthed when needed.
+ */
+export const longRunningOnlyProcedure = t.procedure.use(({ next }) => {
+  if (process.env.DEPLOYMENT_MODE === 'serverless') {
+    throw new TRPCError({
+      code: 'NOT_IMPLEMENTED',
+      message:
+        'This feature requires the long-running deployment. It is not available in serverless mode.',
+    });
+  }
+  return next();
+});
 
 /**
  * Procedure that requires authentication AND business membership.

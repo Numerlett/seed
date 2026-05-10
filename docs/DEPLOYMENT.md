@@ -3,12 +3,13 @@
 SEED uses a split deployment model:
 
 - **Frontend** → Vercel or Netlify (Next.js static/SSR)
-- **Backend** → Any Docker-capable cloud provider (Railway, Render, GCP Cloud Run, AWS ECS)
+- **Backend** → Any Docker-capable cloud provider (Railway, Render, GCP Cloud Run, AWS ECS) **or** a serverless platform (Vercel, Lambda) when running in serverless mode.
 
 ---
 
 ## Table of Contents
 
+- [Deployment Modes](#deployment-modes)
 - [Architecture Overview](#architecture-overview)
 - [Prerequisites](#prerequisites)
 - [Environment Variables](#environment-variables)
@@ -18,6 +19,43 @@ SEED uses a split deployment model:
 - [Database Management](#database-management)
 - [Post-Deployment Checklist](#post-deployment-checklist)
 - [Rollback](#rollback)
+
+---
+
+## Deployment Modes
+
+The backend runs in one of two modes selected by the `DEPLOYMENT_MODE` env var:
+
+| Mode | Use when | Requires Redis? | Worker process? | Scheduled jobs? |
+|---|---|---|---|---|
+| `long-running` (default) | Production with workers, dev with full feature parity, container hosts (Fly, Railway, Render, ECS) | **Yes** — `REDIS_URL` required | Yes — deploy `@seed/jobs` separately | Yes |
+| `serverless` | Pre-revenue / cheap deploys on Vercel, Lambda, Cloud Run scale-to-zero | No | No | **Disabled** — features that require schedulers throw `NOT_IMPLEMENTED` |
+
+### How features behave per mode
+
+Callers in `server/` should import from `server/lib/dispatch` rather than calling adapters or queues directly. The dispatch layer abstracts the mode switch:
+
+| Feature | Serverless | Long-running |
+|---|---|---|
+| `sendEmail` / `sendSms` / `sendWhatsApp` | Inline call to `@seed/integrations` adapter | Enqueue to BullMQ (worker delivers) |
+| `generateEInvoice` | Inline GSP API call, returns `EInvoiceResponse` | Enqueue, returns `null`; worker persists IRN |
+| `generatePdfAsync` | Throws `ServerlessUnavailableError` | Enqueue PDF + email job |
+| Sync invoice PDF download | Call `generateInvoicePdf` from `@seed/pdf` directly (mode-agnostic) | Same |
+| Recurring invoices, stock alerts, payment reminders, large reports, OTP cleanup sweep | tRPC procedure throws `NOT_IMPLEMENTED` (gated by `longRunningOnlyProcedure`) | Worker handles |
+
+### Picking a mode
+
+- **Reaching first customer on free tiers**: serverless. Vercel + Neon + your existing Vercel-hosted web app = ~$0/mo. Caveat: scheduled features (recurring invoices, alerts, reminders) are unavailable until you graduate.
+- **Once you have paying customers** or need any scheduled feature: long-running. Add a small Redis (Upstash fixed-tier ~$10/mo, Railway-bundled, or self-hosted on a Fly volume) and deploy the `@seed/jobs` worker as a second process.
+
+### Switching modes
+
+The default is `long-running`, so existing deployments behave the same as before. To deploy in serverless mode:
+
+1. Set `DEPLOYMENT_MODE=serverless` in the deploy environment.
+2. Omit `REDIS_URL` (or leave it — it's ignored).
+3. Do not deploy the `@seed/jobs` worker process.
+4. Any tRPC route guarded by `longRunningOnlyProcedure` will return `NOT_IMPLEMENTED` to the client; surface this in the UI by hiding/disabling the corresponding feature.
 
 ---
 

@@ -73,6 +73,19 @@ Defined in [server/trpc/procedures.ts](server/trpc/procedures.ts):
 - `businessMemberProcedure` — auth + business membership; **input must include `businessId: string`**; adds `businessId` and `memberRole` to context
 - `adminProcedure` — auth + admin role; adds `adminId` and `isSuperAdmin` to context
 - `superAdminProcedure` — auth + super admin only
+- `longRunningOnlyProcedure` — throws `NOT_IMPLEMENTED` when `DEPLOYMENT_MODE=serverless`. Use for features that require BullMQ workers or scheduled jobs (recurring invoices, stock alerts, payment reminders, large reports).
+
+### Deployment Modes
+
+The backend runs in one of two modes selected by the `DEPLOYMENT_MODE` env var (`long-running` default, or `serverless`). Long-running uses Redis-backed BullMQ queues plus a separate worker process; serverless runs queueable work inline and gates scheduled features behind `longRunningOnlyProcedure`. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for full details.
+
+**When adding a feature that would normally be queued** (email, sms, whatsapp, einvoice, async PDF):
+- Import from [server/lib/dispatch/](server/lib/dispatch/) — never call BullMQ queues or `@seed/integrations` adapters directly from controllers/routers.
+- The wrapper in `dispatch/` branches on `process.env.DEPLOYMENT_MODE`. Keep both paths working.
+
+**For scheduled / heavy features**: use `longRunningOnlyProcedure` from [server/trpc/procedures.ts](server/trpc/procedures.ts).
+
+**Hard rule**: `@seed/jobs` must never be statically imported from `server/`. Only [server/lib/dispatch/](server/lib/dispatch/) wrappers may dynamically `await import('@seed/jobs')`, and only inside the long-running branch. This is what keeps serverless deploys from initialising Redis.
 
 ### Authentication
 
