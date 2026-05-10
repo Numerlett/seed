@@ -1,0 +1,58 @@
+# Fly.io configuration for @seed/server
+# Docs: https://fly.io/docs/reference/configuration/
+#
+# First-time setup:
+#   fly launch --no-deploy          # creates the app and links this file
+#   fly secrets set \
+#     DATABASE_URL="..." \
+#     ACCESS_TOKEN_SECRET="..." \
+#     REFRESH_TOKEN_SECRET="..." \
+#     FRONTEND_URL="https://your-vercel-app.vercel.app" \
+#     GOOGLE_CLIENT_ID="..." \
+#     GOOGLE_CLIENT_SECRET="..." \
+#     SMTP_HOST="..." \
+#     SMTP_PORT="587" \
+#     SMTP_USERNAME="..." \
+#     SMTP_PASSWORD="..." \
+#     SMTP_MAIL="..." \
+#     AWS_REGION="ap-south-1" \
+#     AWS_ACCESS_KEY_ID="..." \
+#     AWS_SECRET_ACCESS_KEY="..." \
+#     AWS_S3_BUCKET_NAME="..."
+#   # Long-running mode only (add REDIS_URL if DEPLOYMENT_MODE=long-running):
+#   # fly secrets set REDIS_URL="redis://..."
+#   fly deploy
+
+app = "seed-server"   # change to your actual Fly app name
+primary_region = "bom" # Mumbai — closest to India; change if your DB is elsewhere
+
+[build]
+  dockerfile = "Dockerfile.server"
+
+[env]
+  PORT            = "8080"
+  NODE_ENV        = "production"
+  # Switch to "long-running" once you add Redis and want BullMQ workers.
+  DEPLOYMENT_MODE = "serverless"
+
+[http_service]
+  internal_port       = 8080
+  force_https         = true
+  auto_start_machines = true
+  # "stop" = scale to zero when idle → free tier friendly.
+  # Change to "suspend" for faster cold starts (~1s vs ~3s) once you have a
+  # paying customer and don't mind the slightly higher cost.
+  auto_stop_machines  = "stop"
+  # 0 = scale to zero. Set to 1 before a customer demo to eliminate cold starts.
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    grace_period = "15s"
+    interval     = "30s"
+    method       = "GET"
+    path         = "/health"
+    timeout      = "5s"
+
+[[vm]]
+  size   = "shared-cpu-1x"
+  memory = "256mb"
