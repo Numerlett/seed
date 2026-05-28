@@ -46,6 +46,15 @@ export function Navigation() {
               Pricing
             </Link>
           </div>
+          <Link
+            href="/user-guide"
+            className={cn(
+              'text-muted-foreground hover:text-foreground hidden text-sm font-medium transition-colors md:block',
+              pathname === '/user-guide' && 'text-foreground font-semibold',
+            )}
+          >
+            User Guide
+          </Link>
         </div>
         <div className="flex items-center gap-2 sm:gap-4">
           <ThemeSwitch />
