@@ -1,3 +1,5 @@
+import { primaryFrontendUrl } from '../frontendUrls';
+
 const otpEmailTemplate = ({
   otp,
   to,
@@ -7,7 +9,7 @@ const otpEmailTemplate = ({
   to: string;
   exp: Date;
 }) => {
-  const frontendUrl = process.env.FRONTEND_URL;
+  const frontendUrl = primaryFrontendUrl;
 
   // Format expiry date
   const formatExpiry = (date: Date) => {

@@ -107,7 +107,10 @@ DATABASE_URL="postgresql://user:password@localhost:5432/seed_db"
 # Server
 PORT=8080
 NODE_ENV=development
+# Single origin, or a comma-separated list of allowed origins for CORS.
+# The first entry is the "primary" URL used for OAuth redirects and email links.
 FRONTEND_URL=http://localhost:3000
+# e.g. FRONTEND_URL=https://app.example.com,https://staging.example.com
 
 # JWT Secrets
 ACCESS_TOKEN_SECRET=your_secret_here

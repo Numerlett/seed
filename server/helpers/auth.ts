@@ -7,6 +7,7 @@ import type { UserModel } from '@seed/database/generated/models';
 import dotenv from 'dotenv';
 import { AccessTokenPayload, RefreshTokenPayload } from '../types/auth';
 import { parseUserAgent, extractIpAddress } from './deviceParser';
+import { primaryFrontendUrl } from './frontendUrls';
 import { logger } from './logger';
 
 dotenv.config();
@@ -60,7 +61,8 @@ export const refreshTokenCookieOptions: CookieOptions = {
   maxAge: ms(refreshTokenExpiry as StringValue),
 };
 
-export const clientBaseUrl = process.env.FRONTEND_URL!;
+// FRONTEND_URL may be a comma-separated list; OAuth redirects use the first.
+export const clientBaseUrl = primaryFrontendUrl;
 
 // --- Test User Configuration ---
 // Only enable test user in development mode

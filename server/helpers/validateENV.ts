@@ -21,8 +21,19 @@ const envSchema = z
       .enum(['serverless', 'long-running'])
       .default('long-running'),
 
-    // Frontend
-    FRONTEND_URL: z.string().url('FRONTEND_URL must be a valid URL'),
+    // Frontend — a single URL or a comma-separated list of allowed origins.
+    FRONTEND_URL: z
+      .string()
+      .min(1, 'FRONTEND_URL is required')
+      .refine(
+        (value) =>
+          value
+            .split(',')
+            .map((url) => url.trim())
+            .filter(Boolean)
+            .every((url) => z.string().url().safeParse(url).success),
+        'FRONTEND_URL must be a valid URL or comma-separated list of URLs',
+      ),
 
     REFRESH_TOKEN_SECRET: z
       .string()

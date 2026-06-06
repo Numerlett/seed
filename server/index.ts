@@ -5,6 +5,7 @@ import { rateLimit } from 'express-rate-limit';
 import { trpcExpress } from './routers';
 import cookieParser from 'cookie-parser';
 import { validateENV } from './helpers/validateENV';
+import { frontendUrls } from './helpers/frontendUrls';
 import { emailTemplateHandler } from './helpers/email-templates';
 import { healthCheckHandler } from './helpers';
 import { logger, requestLogger } from './helpers/logger';
@@ -29,7 +30,15 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL,
+    // FRONTEND_URL may be a comma-separated list of allowed origins.
+    // Requests with no Origin header (e.g. native mobile, curl) are allowed.
+    origin: (origin, callback) => {
+      if (!origin || frontendUrls.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`Origin ${origin} not allowed by CORS`));
+      }
+    },
     credentials: true,
   }),
 );

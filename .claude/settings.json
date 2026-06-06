@@ -9,7 +9,14 @@
       "Bash(mkdir -p pdf/templates)",
       "Bash(rmdir pdf/src/templates pdf/src)",
       "Bash(mkdir -p jobs/lib)",
-      "Bash(mkdir -p integrations/adapters)"
+      "Bash(mkdir -p integrations/adapters)",
+      "Bash(npx --yes expo install expo-secure-store expo-image-picker react-native-svg)",
+      "Bash(npx --yes expo install --fix)",
+      "Bash(pnpm --filter @seed/schemas build)",
+      "Bash(npx tsc *)",
+      "Bash(npx expo *)",
+      "Bash(pnpm --filter @seed/server --filter @seed/api --filter @seed/schemas lint)",
+      "Bash(pnpm -r --filter \"!web\" lint)"
     ]
   },
   "hooks": {

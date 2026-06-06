@@ -1,7 +1,8 @@
 import sendMail from '../sendMail';
+import { primaryFrontendUrl } from '../frontendUrls';
 
 const welcomeEmailTemplate = ({ to }: { to: string }) => {
-  const frontendUrl = process.env.FRONTEND_URL;
+  const frontendUrl = primaryFrontendUrl;
 
   return `
     <!DOCTYPE html>
