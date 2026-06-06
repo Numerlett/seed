@@ -17,6 +17,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.seed.app",
       "adaptiveIcon": {
         "backgroundColor": "#ffffff",
         "foregroundImage": "./assets/images/android-icon-foreground.png"
@@ -38,6 +39,13 @@
         }
       ],
       "expo-web-browser"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "a4ba53b1-0957-47c8-bb0b-6555c33a8fe4"
+      }
+    },
+    "owner": "jayendrabharti"
   }
 }
