@@ -71,6 +71,10 @@ const envSchema = z
     // Google OAuth
     GOOGLE_CLIENT_ID: z.string().min(1, 'GOOGLE_CLIENT_ID is required'),
     GOOGLE_CLIENT_SECRET: z.string().min(1, 'GOOGLE_CLIENT_SECRET is required'),
+    // Comma-separated Google client IDs the mobile app signs in with
+    // (iOS / Android / Expo web client). Used as extra allowed audiences when
+    // verifying mobile ID tokens. Optional — only needed for mobile Google auth.
+    GOOGLE_MOBILE_CLIENT_IDS: z.string().optional(),
 
     // Email Configuration
     SMTP_USERNAME: z.string().min(1, 'SMTP_USERNAME is required'),

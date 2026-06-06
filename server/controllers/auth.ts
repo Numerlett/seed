@@ -7,6 +7,7 @@ import { handleControllerError } from '../helpers/controllerErrorHandler';
 import {
   accessTokenCookieOptions,
   generateTokens,
+  googleClientId,
   refreshSecret,
   refreshTokenCookieOptions,
   testUser,
@@ -372,6 +373,66 @@ export const googleAuthCallback = publicProcedure
     } catch (error: unknown) {
       handleControllerError(error, {
         operation: 'Google OAuth callback',
+      });
+    }
+  });
+
+/**
+ * Google sign-in for mobile / native clients.
+ *
+ * The app obtains a Google ID token natively (e.g. via expo-auth-session) and
+ * sends it here. We verify it against our configured Google client IDs and
+ * return SEED access/refresh tokens in the response body (no cookies), since
+ * native clients use Bearer headers. Set GOOGLE_MOBILE_CLIENT_IDS (comma-
+ * separated iOS/Android/web client IDs used by the app) in the server env.
+ */
+export const googleSignInMobile = publicProcedure
+  .input(z.object({ idToken: z.string().min(1) }))
+  .mutation(async ({ input: { idToken }, ctx: { req, res } }) => {
+    try {
+      const audiences = [
+        googleClientId,
+        ...(process.env.GOOGLE_MOBILE_CLIENT_IDS ?? '')
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+      ];
+
+      const ticket = await oAuth2Client.verifyIdToken({
+        idToken,
+        audience: audiences,
+      });
+      const payload = ticket.getPayload();
+
+      if (!payload?.email) {
+        throw new TRPCError({
+          code: 'UNAUTHORIZED',
+          message: 'Invalid Google token',
+        });
+      }
+
+      const { email, name, picture } = payload;
+
+      let user = await prisma.user.findUnique({ where: { email } });
+      if (!user) {
+        user = await prisma.user.create({
+          data: { email, name, picture },
+        });
+        sendWelcomeEmail(email);
+      }
+
+      const { accessToken, refreshToken } = await generateTokens(
+        req,
+        res,
+        user,
+        'return',
+        'google',
+      );
+
+      return { accessToken, refreshToken, email, success: true };
+    } catch (error: unknown) {
+      handleControllerError(error, {
+        operation: 'Google mobile sign-in',
       });
     }
   });

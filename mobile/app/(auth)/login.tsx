@@ -5,13 +5,24 @@ import { Text, View } from 'react-native';
 
 import { Button, Field, Input, Screen, useToast } from '../../components/ui';
 import { trpc } from '../../lib/trpc';
+import { useGoogleAuth } from '../../lib/useGoogleAuth';
 import { errorMessage } from '../../lib/utils';
+import { useSession } from '../../providers/SessionProvider';
 
 export default function LoginScreen() {
   const router = useRouter();
   const toast = useToast();
+  const { signIn } = useSession();
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string | undefined>();
+
+  const google = useGoogleAuth({
+    onSuccess: async ({ accessToken, refreshToken }) => {
+      await signIn(accessToken, refreshToken);
+      router.replace('/dashboard');
+    },
+    onError: (message) => toast.error(message),
+  });
 
   const loginMutation = trpc.auth.emailLogin.useMutation({
     onSuccess: () => {
@@ -70,6 +81,23 @@ export default function LoginScreen() {
           <Text className="text-center text-xs text-muted-foreground">
             We'll email you a 6-digit code. No password needed.
           </Text>
+
+          {google.available ? (
+            <>
+              <View className="my-1 flex-row items-center gap-3">
+                <View className="h-px flex-1 bg-border" />
+                <Text className="text-xs text-muted-foreground">or</Text>
+                <View className="h-px flex-1 bg-border" />
+              </View>
+
+              <Button
+                label="Continue with Google"
+                variant="outline"
+                loading={google.loading}
+                onPress={() => google.signIn()}
+              />
+            </>
+          ) : null}
         </View>
       </View>
     </Screen>

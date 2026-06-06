@@ -46,6 +46,29 @@ Mobile uses **header-based auth** (the web uses HTTP-only cookies):
    (single-flight) with the stored refresh token, then retries. See
    [lib/trpc.tsx](lib/trpc.tsx) and [lib/auth/tokenStore.ts](lib/auth/tokenStore.ts).
 
+## Google sign-in (optional)
+
+A "Continue with Google" button appears on the login screen when Google OAuth
+client IDs are configured. The flow:
+
+1. The app obtains a Google **ID token** natively via `expo-auth-session`
+   ([lib/useGoogleAuth.ts](lib/useGoogleAuth.ts)).
+2. It sends the ID token to `auth.googleSignInMobile`, which verifies it and
+   returns SEED `{ accessToken, refreshToken }` — same session handling as OTP.
+
+**Setup:**
+
+1. In Google Cloud Console create OAuth client IDs for the platforms you target
+   (iOS, Android, and/or Web for Expo) and set them in `mobile/.env`:
+   `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`, `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`,
+   `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`.
+2. On the **server**, set `GOOGLE_MOBILE_CLIENT_IDS` to the same IDs (comma-
+   separated) so the backend accepts those token audiences.
+
+> ⚠️ Native Google sign-in needs platform client IDs and generally a
+> **development build** (`npx expo run:android` / `eas build`). It does **not**
+> work reliably in Expo Go — use the OTP flow there. OTP requires no setup.
+
 ## Multi-business
 
 Every `businessMemberProcedure` call takes a `businessId`. The active business is held

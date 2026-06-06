@@ -127,6 +127,10 @@ EMAIL_FROM=noreply@yourdomain.com
 GOOGLE_CLIENT_ID=your_client_id
 GOOGLE_CLIENT_SECRET=your_client_secret
 GOOGLE_REDIRECT_URI=http://localhost:8080/api/auth.googleCallback
+# Optional: comma-separated Google client IDs the mobile app uses (iOS/Android/web).
+# Required only for mobile Google sign-in (auth.googleSignInMobile) so the backend
+# accepts those ID-token audiences. Use the same values as the app's EXPO_PUBLIC_GOOGLE_* vars.
+GOOGLE_MOBILE_CLIENT_IDS=
 
 # Test User (dev only)
 TEST_USER_EMAIL=test@example.com

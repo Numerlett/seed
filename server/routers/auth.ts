@@ -8,6 +8,7 @@ import {
   getUserProfileUploadUrl,
   googleAuthCallback,
   googleAuthUrl,
+  googleSignInMobile,
   logout,
   revokeAllSessions,
   revokeOtherSessions,
@@ -29,6 +30,7 @@ export const authRoutes = t.router({
 
   googleAuthUrl,
   googleAuthCallback,
+  googleSignInMobile,
 
   // Session management
   getActiveSessions,
