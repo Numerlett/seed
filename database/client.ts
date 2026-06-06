@@ -4,6 +4,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 
 const adapter = new PrismaPg({
   connectionString: process.env.DATABASE_URL,
+  idleTimeoutMillis: 10_000,
 });
 
 // Use globalThis for broader environment compatibility
