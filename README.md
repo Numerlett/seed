@@ -9,6 +9,7 @@ SEED is built as a **monorepo** using **pnpm workspaces**, with clear separation
 ### Technology Stack
 
 - **Frontend**: Next.js 16, React 19, TailwindCSS, Radix UI, Framer Motion
+- **Mobile**: React Native (Expo SDK 56), Expo Router, NativeWind — shares the same backend, `@seed/api` types, and `@seed/schemas` ([mobile/README.md](mobile/README.md))
 - **Backend**: Express.js, tRPC for type-safe APIs
 - **Database**: PostgreSQL with Prisma ORM
 - **Authentication**: JWT tokens with refresh token rotation
@@ -29,6 +30,12 @@ seed/
 │   ├── server.ts          # Server-side tRPC utilities
 │   ├── Provider.tsx       # React Query + tRPC provider
 │   └── types.ts           # Shared API types
+│
+├── mobile/               # React Native (Expo) app — see mobile/README.md
+│   ├── app/              # Expo Router screens (auth, tabs, module CRUD)
+│   ├── components/       # Forms, line-item editor, UI kit
+│   ├── lib/             # tRPC client, secure token store, utils
+│   └── providers/       # Session & Business context (mobile)
 │
 ├── database/              # Database layer with Prisma
 │   ├── schema.prisma      # Base schema (generator + datasource)
