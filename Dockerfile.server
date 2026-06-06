@@ -3,7 +3,7 @@
 # ========================
 FROM node:24-alpine AS builder
 
-RUN npm install -g pnpm
+RUN npm install -g pnpm@10.26.1
 
 WORKDIR /app
 
@@ -20,6 +20,10 @@ COPY integrations/ ./integrations/
 COPY pdf/ ./pdf/
 COPY server/ ./server/
 
+# Bypass pnpm v10 minimumReleaseAge policy: shared lockfile includes mobile/Expo
+# packages that were recently published; they aren't installed here but pnpm still
+# validates every lockfile entry. Not needed for the server build.
+RUN echo "minimum-release-age=0" >> .npmrc
 # Install all dependencies; rebuild native addons separately because
 # pnpm v10 ERR_PNPM_IGNORED_BUILDS blocks --frozen-lockfile + build scripts
 RUN pnpm install --frozen-lockfile --ignore-scripts
@@ -40,7 +44,7 @@ RUN pnpm --filter @seed/server build
 # ========================
 FROM node:24-alpine AS runner
 
-RUN npm install -g pnpm
+RUN npm install -g pnpm@10.26.1
 
 WORKDIR /app
 
@@ -82,7 +86,7 @@ COPY --from=builder /app/server/package.json ./server/
 COPY --from=builder /app/server/dist ./server/dist
 
 # Install production dependencies only
-RUN pnpm install --prod --frozen-lockfile --ignore-scripts
+RUN echo "minimum-release-age=0" >> .npmrc && pnpm install --prod --frozen-lockfile --ignore-scripts
 RUN pnpm rebuild @prisma/engines prisma msgpackr-extract
 
 EXPOSE 8080
