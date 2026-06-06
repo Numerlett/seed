@@ -9,7 +9,7 @@ SEED is built as a **monorepo** using **pnpm workspaces**, with clear separation
 ### Technology Stack
 
 - **Frontend**: Next.js 16, React 19, TailwindCSS, Radix UI, Framer Motion
-- **Mobile**: React Native (Expo SDK 56), Expo Router, NativeWind — shares the same backend, `@seed/api` types, and `@seed/schemas` ([mobile/README.md](mobile/README.md))
+- **Mobile**: React Native (Expo SDK 56), Expo Router, NativeWind — shares the same backend, `@seed/api` types, and `@seed/schemas` (full guide: [docs/mobile.md](docs/mobile.md))
 - **Backend**: Express.js, tRPC for type-safe APIs
 - **Database**: PostgreSQL with Prisma ORM
 - **Authentication**: JWT tokens with refresh token rotation
