@@ -1,9 +1,36 @@
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 
 // SecureStore keys must be alphanumeric with ".", "-" and "_".
 const ACCESS_KEY = 'seed_access_token';
 const REFRESH_KEY = 'seed_refresh_token';
 const BIZ_KEY = 'seed_business_membership_id';
+
+// expo-secure-store is native-only. On web (and SSR) fall back to localStorage
+// so the app runs everywhere without crashing.
+const storage =
+  Platform.OS === 'web'
+    ? {
+        getItem: (key: string) =>
+          Promise.resolve(
+            typeof localStorage !== 'undefined'
+              ? localStorage.getItem(key)
+              : null,
+          ),
+        setItem: (key: string, value: string) => {
+          if (typeof localStorage !== 'undefined') localStorage.setItem(key, value);
+          return Promise.resolve();
+        },
+        removeItem: (key: string) => {
+          if (typeof localStorage !== 'undefined') localStorage.removeItem(key);
+          return Promise.resolve();
+        },
+      }
+    : {
+        getItem: SecureStore.getItemAsync,
+        setItem: SecureStore.setItemAsync,
+        removeItem: SecureStore.deleteItemAsync,
+      };
 
 // In-memory cache so the tRPC fetch wrapper can read the access token synchronously
 // on every request without hitting SecureStore each time.
@@ -13,8 +40,8 @@ let hydrated = false;
 
 /** Load persisted tokens into memory once at app startup. */
 export async function hydrateTokens(): Promise<void> {
-  memAccess = await SecureStore.getItemAsync(ACCESS_KEY);
-  memRefresh = await SecureStore.getItemAsync(REFRESH_KEY);
+  memAccess = await storage.getItem(ACCESS_KEY);
+  memRefresh = await storage.getItem(REFRESH_KEY);
   hydrated = true;
 }
 
@@ -32,7 +59,7 @@ export function hasTokenSync(): boolean {
 
 export async function getRefreshToken(): Promise<string | null> {
   if (memRefresh) return memRefresh;
-  memRefresh = await SecureStore.getItemAsync(REFRESH_KEY);
+  memRefresh = await storage.getItem(REFRESH_KEY);
   return memRefresh;
 }
 
@@ -43,8 +70,8 @@ export async function setTokens(
   memAccess = accessToken;
   memRefresh = refreshToken;
   await Promise.all([
-    SecureStore.setItemAsync(ACCESS_KEY, accessToken),
-    SecureStore.setItemAsync(REFRESH_KEY, refreshToken),
+    storage.setItem(ACCESS_KEY, accessToken),
+    storage.setItem(REFRESH_KEY, refreshToken),
   ]);
 }
 
@@ -52,21 +79,21 @@ export async function clearTokens(): Promise<void> {
   memAccess = null;
   memRefresh = null;
   await Promise.all([
-    SecureStore.deleteItemAsync(ACCESS_KEY),
-    SecureStore.deleteItemAsync(REFRESH_KEY),
+    storage.removeItem(ACCESS_KEY),
+    storage.removeItem(REFRESH_KEY),
   ]);
 }
 
 // --- Active business selection (mirrors web's localStorage 'businessMembershipId') ---
 
 export async function getStoredBusinessMembershipId(): Promise<string | null> {
-  return SecureStore.getItemAsync(BIZ_KEY);
+  return storage.getItem(BIZ_KEY);
 }
 
 export async function setStoredBusinessMembershipId(id: string): Promise<void> {
-  await SecureStore.setItemAsync(BIZ_KEY, id);
+  await storage.setItem(BIZ_KEY, id);
 }
 
 export async function clearStoredBusinessMembershipId(): Promise<void> {
-  await SecureStore.deleteItemAsync(BIZ_KEY);
+  await storage.removeItem(BIZ_KEY);
 }
