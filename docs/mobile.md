@@ -26,6 +26,9 @@ clients see it.
 - [Features](#features)
 - [Google sign-in setup](#google-sign-in-setup)
 - [Shipping a build](#shipping-a-build)
+  - [Expo Go](#option-a--expo-go-fastest-dev-only)
+  - [EAS Build (cloud)](#option-b--eas-build-cloud-apk--aab)
+  - [Local build](#local-build-requires-android-studio)
 - [Monorepo & Metro notes](#monorepo--metro-notes)
 - [Troubleshooting](#troubleshooting)
 - [Working on all three apps together](#working-on-all-three-apps-together)
@@ -317,43 +320,248 @@ new route.
 
 ## Google sign-in setup
 
-The app uses the **native ID-token** flow: it obtains a Google ID token on the
-device and exchanges it for SEED tokens via `auth.googleSignInMobile` (which
-verifies the token's signature and audience server-side). This flow works over a
-plain-HTTP LAN backend in development, unlike redirect-based OAuth.
+The app uses the **native ID-token flow**: the device runs Google's OAuth flow
+locally, obtains a Google ID token, and exchanges it for SEED tokens via the
+`auth.googleSignInMobile` tRPC mutation. The server verifies the token signature
+and audience and returns `{ accessToken, refreshToken }` in the response body
+(no cookies — mobile uses `Authorization: Bearer` headers).
 
-1. **Google Cloud Console** — create OAuth client IDs for the platforms you target
-   (iOS, Android, and/or Web for Expo).
-2. **App env** (`mobile/.env`):
-   ```
-   EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=...
-   EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID=...
-   EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=...
-   ```
-3. **Server env** (`server/.env`): set `GOOGLE_MOBILE_CLIENT_IDS` to the same IDs
-   (comma-separated) so the backend accepts those audiences.
+> ⚠️ **Expo Go limitation:** native Google sign-in requires platform OAuth client
+> IDs and a **development build** (`eas build --profile development` or
+> `npx expo run:android`). It does **not** work reliably in Expo Go. Use OTP login
+> during Expo Go development.
 
-> ⚠️ **Expo Go limitation:** native Google sign-in needs platform client IDs and
-> generally a **development build** (`npx expo run:android` / `eas build`). It does
-> **not** work reliably in Expo Go — use OTP there. OTP needs no configuration.
+---
 
-Implementation: [lib/useGoogleAuth.ts](../mobile/lib/useGoogleAuth.ts) (client) and
-`googleSignInMobile` in `server/controllers/auth.ts` (server).
+### How it works (code path)
+
+```
+login.tsx
+  → google.signIn()                          # useGoogleAuth.ts: promptAsync()
+  → Google OAuth popup (expo-auth-session)
+  ← id_token in response.params
+  → trpc.auth.googleSignInMobile({ idToken })
+  → server: verifyIdToken() checks audiences (GOOGLE_CLIENT_ID + GOOGLE_MOBILE_CLIENT_IDS)
+  ← { accessToken, refreshToken }
+  → signIn(accessToken, refreshToken)        # SessionProvider: stored in secure-store
+  → router.replace('/dashboard')
+```
+
+The "Continue with Google" button is **conditionally rendered** — it only appears
+when `googleAuthConfigured` is `true` (at least one `EXPO_PUBLIC_GOOGLE_*_CLIENT_ID`
+is set). See [lib/useGoogleAuth.ts](../mobile/lib/useGoogleAuth.ts).
+
+---
+
+### Step 1 — Get your Android SHA-1 fingerprint
+
+Android OAuth clients are **tied to a package name + signing certificate**. You
+need the SHA-1 fingerprint of the keystore that signs the build.
+
+The EAS-managed keystore SHA-1 for this project's **development** profile is:
+
+```
+97:59:3F:81:04:9B:42:C6:01:E4:28:EF:DE:C1:4A:50:92:F2:39:3D
+```
+
+To retrieve it again at any time:
+
+```bash
+cd mobile
+eas credentials   # select Android → development → view keystore
+```
+
+> If you create a **production** build profile with a separate keystore, that
+> profile will have a different SHA-1 and needs its own Android OAuth client.
+
+---
+
+### Step 2 — Create OAuth client IDs in Google Cloud Console
+
+Go to **APIs & Services → Credentials → + Create Credentials → OAuth client ID**.
+
+**Android client** (needed for device builds):
+| Field | Value |
+|-------|-------|
+| Application type | Android |
+| Package name | `com.seed.app` |
+| SHA-1 fingerprint | from Step 1 above |
+
+**Web client** (needed for Expo Go and web target):
+| Field | Value |
+|-------|-------|
+| Application type | Web application |
+
+> The project already has a web/server OAuth client (`GOOGLE_CLIENT_ID` in
+> `server/.env`). You can reuse that client ID as the Web client ID here, or
+> create a dedicated one.
+
+---
+
+### Step 3 — Configure environment variables
+
+**Local dev** (`mobile/.env`):
+```
+EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=<ios-client-id>.apps.googleusercontent.com
+EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID=<android-client-id>.apps.googleusercontent.com
+EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
+```
+
+**EAS builds** (`mobile/eas.json`, in each profile's `env` block):
+```json
+"EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "<android-client-id>.apps.googleusercontent.com"
+```
+EAS does **not** read `mobile/.env` — values must be in `eas.json` or set via
+`eas secret:create --scope project` for sensitive keys.
+
+**Server** (`server/.env`):
+```
+GOOGLE_MOBILE_CLIENT_IDS=<android-client-id>.apps.googleusercontent.com,<ios-client-id>.apps.googleusercontent.com
+```
+The server's `googleSignInMobile` handler validates the ID token audience against
+`GOOGLE_CLIENT_ID` (the web/server client) plus every ID in `GOOGLE_MOBILE_CLIENT_IDS`
+(comma-separated). Without this, the server will reject tokens issued to mobile clients.
+
+---
+
+### Current configuration (as of project setup)
+
+| Client | ID |
+|--------|----|
+| Android (EAS dev/preview/production keystore) | `37157930076-1jad2k8nkiv6fp4aa4id6fh5cu4sj4vq` |
+| iOS / Web | `37157930076-4fdgln3k6ve05evqrrbvdgmernkanan2` |
+
+Implementation files:
+- Client: [lib/useGoogleAuth.ts](../mobile/lib/useGoogleAuth.ts)
+- Server: `googleSignInMobile` in [server/controllers/auth.ts](../server/controllers/auth.ts)
 
 ---
 
 ## Shipping a build
 
-- **Expo Go (fastest)** — `pnpm --filter mobile start`, scan the QR. Great for the
-  OTP flow and most features; not for native Google sign-in.
-- **Development build** — `npx expo run:android` / `npx expo run:ios`, or an
-  [EAS build](https://docs.expo.dev/build/introduction/). Needed for native Google
-  sign-in and any custom native config.
-- **Production** — configure `app.json` (name, slug, icons, bundle identifiers),
-  point `EXPO_PUBLIC_SERVER_BASE_URL` at your production backend (HTTPS), set the
-  production Google client IDs, then build & submit with EAS.
+### Option A — Expo Go (fastest, dev only)
 
-Type-check before shipping: `pnpm --filter mobile lint` (and `pnpm lint` for the
+```bash
+pnpm --filter mobile start   # scan QR with Expo Go on your phone
+```
+
+Works for OTP login and most features. Not suitable for native Google sign-in or
+production distribution.
+
+---
+
+### Option B — EAS Build (cloud APK / AAB)
+
+EAS Build compiles your app on Expo's servers — no Android SDK or Xcode needed
+locally. The project is already configured; follow these steps once per machine.
+
+#### One-time setup
+
+```bash
+# 1. Install EAS CLI globally
+npm install -g eas-cli
+
+# 2. Log in to your Expo account (opens browser)
+eas login
+
+# 3. From inside mobile/, link the project (writes projectId to app.json)
+cd mobile
+eas init
+```
+
+> The `eas init` step writes `extra.eas.projectId` to `mobile/app.json` and ties
+> the build to your Expo account (`owner: "jayendrabharti"`). Only needed once.
+
+#### Build an APK (preview profile)
+
+```bash
+cd mobile
+eas build -p android --profile preview
+```
+
+- Produces a **`.apk`** file downloadable from the Expo dashboard.
+- Install on any Android device — no Play Store needed.
+- Takes ~10 minutes on a cold build; subsequent builds are faster (cache).
+- EAS generates and manages the Android keystore automatically (stored on Expo
+  servers). Download and back it up from the Expo dashboard if you need it later.
+
+#### Build a release AAB (production profile)
+
+```bash
+eas build -p android --profile production
+```
+
+Produces a **`.aab`** (Android App Bundle) for Google Play submission.
+
+#### Build profiles
+
+The three profiles in [`mobile/eas.json`](../mobile/eas.json):
+
+| Profile | Output | Use for |
+|---------|--------|---------|
+| `development` | APK (dev client) | Internal testing with Expo dev client |
+| `preview` | APK | Sharing a testable build without Play Store |
+| `production` | AAB | Play Store submission |
+
+#### Environment variables in EAS builds
+
+EAS does **not** read your local `mobile/.env`. The `EXPO_PUBLIC_*` variables are
+baked directly into each build profile's `env` block in `eas.json`:
+
+```json
+"env": {
+  "EXPO_PUBLIC_SERVER_BASE_URL": "https://seed-00uw.onrender.com",
+  "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "...",
+  "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "...",
+  "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "..."
+}
+```
+
+To update a value, edit `eas.json` and trigger a new build. For genuinely secret
+values (API keys that must not appear in the bundle), use
+`eas secret:create --scope project` instead.
+
+#### The `@seed/schemas` build hook
+
+The EAS build server clones only what git tracks — `schemas/dist/` is gitignored
+and therefore absent. The `mobile/package.json` contains an EAS-specific hook that
+compiles schemas automatically after `pnpm install` completes on the build server:
+
+```json
+"eas-build-post-install": "pnpm --filter @seed/schemas build"
+```
+
+This is already wired up. Do not remove it or the Metro bundler will fail with
+`Cannot resolve @seed/schemas/dist/index.js`.
+
+#### Android package name
+
+The app's Android package ID is `com.seed.app` (set in `mobile/app.json`
+→ `android.package`). This is permanent once you publish to the Play Store —
+changing it after first publish requires a new Play Store listing.
+
+---
+
+### Local build (requires Android Studio)
+
+Only needed if you want full local control or offline builds.
+
+```bash
+# Generate native android/ directory
+cd mobile
+npx expo prebuild --platform android
+
+# Build debug APK
+cd android
+./gradlew assembleDebug
+
+# Build release APK (needs a signing config in android/app/build.gradle)
+./gradlew assembleRelease
+```
+
+---
+
+Type-check before any build: `pnpm --filter mobile lint` (and `pnpm lint` for the
 whole monorepo).
 
 ---
@@ -386,6 +594,8 @@ whole monorepo).
 | Google button missing | Set at least one `EXPO_PUBLIC_GOOGLE_*_CLIENT_ID`. |
 | Google sign-in fails in Expo Go | Expected — use a development build; or use OTP. |
 | Logged out after expiry | Normal if the refresh token is invalid/expired; sign in again. Otherwise check the 401-refresh path in `lib/trpc.tsx`. |
+| EAS build fails: `Cannot resolve @seed/schemas/dist/index.js` | The `eas-build-post-install` hook in `mobile/package.json` is missing or was removed. Restore it: `"eas-build-post-install": "pnpm --filter @seed/schemas build"`. |
+| EAS build: env vars not taking effect | EAS ignores local `.env` files. Update the `env` block in the relevant build profile in `mobile/eas.json` and trigger a new build. |
 
 ---
 

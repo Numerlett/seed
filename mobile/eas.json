@@ -9,7 +9,7 @@
       "env": {
         "EXPO_PUBLIC_SERVER_BASE_URL": "https://seed-00uw.onrender.com",
         "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "37157930076-4fdgln3k6ve05evqrrbvdgmernkanan2.apps.googleusercontent.com",
-        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "37157930076-4fdgln3k6ve05evqrrbvdgmernkanan2.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "37157930076-1jad2k8nkiv6fp4aa4id6fh5cu4sj4vq.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "37157930076-4fdgln3k6ve05evqrrbvdgmernkanan2.apps.googleusercontent.com"
       }
     },
@@ -21,7 +21,7 @@
       "env": {
         "EXPO_PUBLIC_SERVER_BASE_URL": "https://seed-00uw.onrender.com",
         "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "37157930076-4fdgln3k6ve05evqrrbvdgmernkanan2.apps.googleusercontent.com",
-        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "37157930076-4fdgln3k6ve05evqrrbvdgmernkanan2.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "37157930076-1jad2k8nkiv6fp4aa4id6fh5cu4sj4vq.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "37157930076-4fdgln3k6ve05evqrrbvdgmernkanan2.apps.googleusercontent.com"
       }
     },
@@ -32,7 +32,7 @@
       "env": {
         "EXPO_PUBLIC_SERVER_BASE_URL": "https://seed-00uw.onrender.com",
         "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "37157930076-4fdgln3k6ve05evqrrbvdgmernkanan2.apps.googleusercontent.com",
-        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "37157930076-4fdgln3k6ve05evqrrbvdgmernkanan2.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "37157930076-1jad2k8nkiv6fp4aa4id6fh5cu4sj4vq.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "37157930076-4fdgln3k6ve05evqrrbvdgmernkanan2.apps.googleusercontent.com"
       }
     }
