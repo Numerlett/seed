@@ -24,7 +24,24 @@ logger.info(
   `Booting in ${envValidation.data.DEPLOYMENT_MODE} mode`,
 );
 
+// Long-running mode dispatches queueable work to BullMQ. No workers consume
+// those queues yet, so jobs would be accepted and silently never run. Refuse to
+// start rather than drop mail, e-invoices and PDFs on the floor.
+if (envValidation.data.DEPLOYMENT_MODE === 'long-running') {
+  logger.error(
+    'DEPLOYMENT_MODE=long-running requires BullMQ workers, and none are implemented yet. ' +
+      'Queued work (email, sms, whatsapp, pdf, einvoice) would be enqueued and never processed. ' +
+      'Use DEPLOYMENT_MODE=serverless until the worker process exists.',
+  );
+  process.exit(1);
+}
+
 const app = express();
+
+// Fly (and any reverse proxy) terminates the connection, so without this every
+// request reports the proxy's address and all clients share one rate-limit
+// budget. Must be set before any limiter reads req.ip.
+app.set('trust proxy', 1);
 
 app.use(express.json());
 app.use(cookieParser());
@@ -44,31 +61,22 @@ app.use(
 );
 app.use(requestLogger);
 
-// Rate limiters applied to specific tRPC procedure paths
-const otpVerifyLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10,
+// Coarse volumetric guard across the whole API. Per-procedure limits live in
+// the tRPC middleware chain (server/trpc/rateLimit.ts), because path-mounted
+// limiters are bypassable: a batched call to `/api/a.proc,b.proc` does not
+// match a limiter mounted on `/api/a.proc`.
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many OTP verification attempts. Try again later.' },
+  message: { error: 'Too many requests. Slow down and try again shortly.' },
 });
-
-const tokenRefreshLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many token refresh requests. Try again later.' },
-});
-
-// Apply rate limiters before the tRPC handler for specific sub-paths
-app.use('/api/auth.emailVerify', otpVerifyLimiter);
-app.use('/api/auth.getNewAccessToken', tokenRefreshLimiter);
 
 app.get('/', (_req, res) => res.send('This is SEED server.'));
 app.get('/health', healthCheckHandler);
 app.get('/email-template', emailTemplateHandler);
-app.use('/api', trpcExpress);
+app.use('/api', apiLimiter, trpcExpress);
 
 const PORT = process.env.PORT || 8080;
 

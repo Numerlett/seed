@@ -17,6 +17,7 @@ import { oAuth2Client } from '../helpers/googleClient';
 import axios from 'axios';
 import jwt from 'jsonwebtoken';
 import { protectedProcedure, publicProcedure } from '../trpc/procedures';
+import { rateLimit } from '../trpc/rateLimit';
 import {
   cleanupExpiredTokens,
   findSessionByToken,
@@ -136,6 +137,15 @@ export const setProfilePicture = protectedProcedure
   });
 
 export const emailLogin = publicProcedure
+  .use(
+    rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 5,
+      name: 'auth.emailLogin',
+      message:
+        'Too many sign-in requests from this device. Try again in a few minutes.',
+    }),
+  )
   .input(
     z.object({
       email: z.string().email(),
@@ -143,23 +153,11 @@ export const emailLogin = publicProcedure
   )
   .mutation(async ({ input: { email } }) => {
     try {
-      let user = await prisma.user.findUnique({ where: { email } });
-
-      if (!user) {
-        user = await prisma.user.create({
-          data: {
-            email,
-          },
-        });
-        sendWelcomeEmail(email);
-      }
-
-      if (!user)
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: 'User not found',
-          cause: 'Failed to create user',
-        });
+      // No account is created here. Issuing an OTP is unauthenticated, so
+      // creating a row would let anyone mint users and send mail from this
+      // domain to arbitrary addresses. The account is created once the OTP is
+      // actually verified. Responding identically for known and unknown
+      // addresses also avoids disclosing who has an account.
 
       // Check for recent OTP request (rate limiting)
       const recentOtp = await prisma.otp.findFirst({
@@ -229,6 +227,14 @@ export const emailLogin = publicProcedure
   });
 
 export const emailVerify = publicProcedure
+  .use(
+    rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 10,
+      name: 'auth.emailVerify',
+      message: 'Too many verification attempts. Try again in a few minutes.',
+    }),
+  )
   .input(
     z.object({
       email: z.string().email(),
@@ -282,12 +288,19 @@ export const emailVerify = publicProcedure
       // Delete OTP record on successful verification (prevents replay)
       await prisma.otp.delete({ where: { id: otpRecord.id } });
 
-      const user = await prisma.user.findUnique({ where: { email } });
+      // The account is created here rather than when the OTP was requested, so
+      // an unverified address never results in a stored user.
+      const existingUser = await prisma.user.findUnique({ where: { email } });
+      const user = existingUser ?? (await prisma.user.create({ data: { email } }));
+
+      if (!existingUser) {
+        sendWelcomeEmail(email);
+      }
 
       const { accessToken, refreshToken } = await generateTokens(
         req,
         res,
-        user!,
+        user,
         'cookie',
         'email',
       );
@@ -472,6 +485,13 @@ export const logout = protectedProcedure.mutation(
 );
 
 export const getNewAccessToken = publicProcedure
+  .use(
+    rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 30,
+      name: 'auth.getNewAccessToken',
+    }),
+  )
   .input(
     z.object({
       refreshToken: z.string().optional(),
