@@ -1,5 +1,6 @@
 import { prisma, AccountSubType } from '@seed/database';
 import { TRPCError } from '@trpc/server';
+import { assertPostable } from '@seed/accounting';
 
 // Seed the default Indian Chart of Accounts for a new business
 const DEFAULT_COA = [
@@ -115,10 +116,23 @@ export async function createManualJournalEntry(
     lines: Array<{ accountId: string; debit: number; credit: number; description?: string }>;
   },
 ) {
-  const totalDebit = input.lines.reduce((s, l) => s + l.debit, 0);
-  const totalCredit = input.lines.reduce((s, l) => s + l.credit, 0);
-  if (Math.abs(totalDebit - totalCredit) > 0.001) {
-    throw new TRPCError({ code: 'BAD_REQUEST', message: `Journal entry is not balanced: debits=${totalDebit}, credits=${totalCredit}` });
+  // Validated by @seed/accounting rather than inline: it compares in exact
+  // decimal arithmetic and also rejects negative and double-sided lines, which
+  // the previous float tolerance let through.
+  try {
+    assertPostable(
+      input.lines.map((l) => ({
+        accountCode: l.accountId,
+        debit: l.debit,
+        credit: l.credit,
+      })),
+    );
+  } catch (error) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: error instanceof Error ? error.message : 'Invalid journal entry',
+      cause: error,
+    });
   }
 
   return prisma.journalEntry.create({
@@ -144,61 +158,89 @@ export async function createManualJournalEntry(
 export async function getTrialBalance(businessId: string, asOf?: Date) {
   const dateFilter = asOf ? { date: { lte: asOf } } : {};
 
-  const lines = await prisma.journalLine.findMany({
+  // Aggregated in the database rather than by loading every journal line into
+  // memory: a business with a few years of history would otherwise exhaust the
+  // machine long before the report rendered.
+  const grouped = await prisma.journalLine.groupBy({
+    by: ['accountId'],
     where: { entry: { businessId, ...dateFilter } },
-    include: { account: true },
+    _sum: { debit: true, credit: true },
   });
 
-  const map = new Map<string, { account: { code: string; name: string; type: string }; debit: number; credit: number }>();
-  for (const line of lines) {
-    const key = line.accountId;
-    if (!map.has(key)) {
-      map.set(key, {
-        account: { code: line.account.code, name: line.account.name, type: line.account.type },
-        debit: 0,
-        credit: 0,
-      });
-    }
-    const entry = map.get(key)!;
-    entry.debit += Number(line.debit);
-    entry.credit += Number(line.credit);
+  if (grouped.length === 0) {
+    return { rows: [], totals: { debit: 0, credit: 0 } };
   }
 
-  const rows = Array.from(map.values()).sort((a, b) => a.account.code.localeCompare(b.account.code));
-  const totals = rows.reduce((s, r) => ({ debit: s.debit + r.debit, credit: s.credit + r.credit }), { debit: 0, credit: 0 });
+  const accounts = await prisma.chartOfAccount.findMany({
+    where: { id: { in: grouped.map((g) => g.accountId) } },
+    select: { id: true, code: true, name: true, type: true },
+  });
+  const accountById = new Map(accounts.map((a) => [a.id, a]));
+
+  const rows = grouped
+    .map((group) => {
+      const account = accountById.get(group.accountId);
+      return {
+        account: {
+          code: account?.code ?? '',
+          name: account?.name ?? 'Unknown account',
+          type: account?.type ?? '',
+        },
+        debit: Number(group._sum.debit ?? 0),
+        credit: Number(group._sum.credit ?? 0),
+      };
+    })
+    .sort((a, b) => a.account.code.localeCompare(b.account.code));
+
+  const totals = rows.reduce(
+    (s, r) => ({ debit: s.debit + r.debit, credit: s.credit + r.credit }),
+    { debit: 0, credit: 0 },
+  );
 
   return { rows, totals };
 }
 
 export async function getProfitAndLoss(businessId: string, dateFrom: Date, dateTo: Date) {
-  const lines = await prisma.journalLine.findMany({
+  // Aggregated per account in the database rather than by streaming every
+  // journal line through Node.
+  const grouped = await prisma.journalLine.groupBy({
+    by: ['accountId'],
     where: {
       entry: { businessId, date: { gte: dateFrom, lte: dateTo } },
       account: { type: { in: ['INCOME', 'EXPENSE'] } },
     },
-    include: { account: { select: { code: true, name: true, type: true } } },
+    _sum: { debit: true, credit: true },
   });
 
-  let revenue = 0;
-  let expenses = 0;
   const incomeLines: { name: string; amount: number }[] = [];
   const expenseLines: { name: string; amount: number }[] = [];
-  const incomeMap = new Map<string, number>();
-  const expenseMap = new Map<string, number>();
+  let revenue = 0;
+  let expenses = 0;
 
-  for (const line of lines) {
-    const net = Number(line.credit) - Number(line.debit);
-    if (line.account.type === 'INCOME') {
-      revenue += net;
-      incomeMap.set(line.account.name, (incomeMap.get(line.account.name) ?? 0) + net);
-    } else {
-      expenses += -net;
-      expenseMap.set(line.account.name, (expenseMap.get(line.account.name) ?? 0) + -net);
+  if (grouped.length > 0) {
+    const accounts = await prisma.chartOfAccount.findMany({
+      where: { id: { in: grouped.map((g) => g.accountId) } },
+      select: { id: true, name: true, type: true },
+    });
+    const accountById = new Map(accounts.map((a) => [a.id, a]));
+
+    for (const group of grouped) {
+      const account = accountById.get(group.accountId);
+      if (!account) continue;
+
+      // Income accounts carry a credit balance, expenses a debit balance.
+      const net =
+        Number(group._sum.credit ?? 0) - Number(group._sum.debit ?? 0);
+
+      if (account.type === 'INCOME') {
+        revenue += net;
+        incomeLines.push({ name: account.name, amount: net });
+      } else {
+        expenses += -net;
+        expenseLines.push({ name: account.name, amount: -net });
+      }
     }
   }
-
-  for (const [name, amount] of incomeMap) incomeLines.push({ name, amount });
-  for (const [name, amount] of expenseMap) expenseLines.push({ name, amount });
 
   return {
     revenue,

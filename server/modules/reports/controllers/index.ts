@@ -1,4 +1,12 @@
 import { prisma } from '@seed/database';
+import { logger } from '../../../helpers/logger';
+
+/**
+ * Ceiling on rows loaded for reports that cannot be paginated without changing
+ * their meaning. Reaching it means the report is too wide to be useful anyway.
+ */
+const MAX_STATEMENT_ROWS_PER_SOURCE = 1000;
+const MAX_STOCK_SUMMARY_ROWS = 5000;
 
 export async function getStockSummary(businessId: string, warehouseId?: string) {
   // InventoryStock doesn't have businessId — filter via warehouse
@@ -15,7 +23,15 @@ export async function getStockSummary(businessId: string, warehouseId?: string) 
       warehouse: { select: { name: true } },
     },
     orderBy: { product: { name: 'asc' } },
+    take: MAX_STOCK_SUMMARY_ROWS,
   });
+
+  if (stocks.length === MAX_STOCK_SUMMARY_ROWS) {
+    logger.warn(
+      { businessId, warehouseId, cap: MAX_STOCK_SUMMARY_ROWS },
+      'Stock summary hit its row cap and is incomplete; it needs pagination',
+    );
+  }
 
   return stocks.map((s) => ({
     productId: s.productId,
@@ -131,23 +147,37 @@ export async function getPartyStatement(
   partyId: string,
   input: { dateFrom: Date; dateTo: Date },
 ) {
+  // A running-balance statement needs every row in the range, so it cannot be
+  // paginated without changing what the balance means. Cap each source instead
+  // and tell the caller when the range was too wide, rather than loading an
+  // unbounded result set into memory.
+  const take = MAX_STATEMENT_ROWS_PER_SOURCE + 1;
+
   const [sales, purchases, payments] = await Promise.all([
     prisma.saleInvoice.findMany({
       where: { businessId, customerId: partyId, invoiceDate: { gte: input.dateFrom, lte: input.dateTo }, status: 'CONFIRMED' },
       orderBy: { invoiceDate: 'asc' },
       select: { id: true, documentNumber: true, invoiceDate: true, grandTotal: true },
+      take,
     }),
     prisma.purchaseOrder.findMany({
       where: { businessId, supplierId: partyId, orderDate: { gte: input.dateFrom, lte: input.dateTo }, status: 'CONFIRMED' },
       orderBy: { orderDate: 'asc' },
       select: { id: true, documentNumber: true, orderDate: true, grandTotal: true },
+      take,
     }),
     prisma.payment.findMany({
       where: { businessId, partyId, date: { gte: input.dateFrom, lte: input.dateTo } },
       orderBy: { date: 'asc' },
       select: { id: true, documentNumber: true, date: true, amount: true, type: true },
+      take,
     }),
   ]);
+
+  const truncated =
+    sales.length > MAX_STATEMENT_ROWS_PER_SOURCE ||
+    purchases.length > MAX_STATEMENT_ROWS_PER_SOURCE ||
+    payments.length > MAX_STATEMENT_ROWS_PER_SOURCE;
 
   const ledger = [
     ...sales.map((s) => ({ date: s.invoiceDate, docNo: s.documentNumber, description: 'Sale Invoice', debit: Number(s.grandTotal), credit: 0 })),
@@ -161,7 +191,14 @@ export async function getPartyStatement(
     return { ...row, balance: runningBalance };
   });
 
-  return { rows, closingBalance: runningBalance };
+  return {
+    rows,
+    closingBalance: runningBalance,
+    truncated,
+    ...(truncated && {
+      truncationNotice: `Showing the first ${MAX_STATEMENT_ROWS_PER_SOURCE} entries per document type. Narrow the date range for a complete statement.`,
+    }),
+  };
 }
 
 export async function getLowStockReport(businessId: string) {
