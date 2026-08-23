@@ -29,10 +29,18 @@ primary_region = "bom" # Mumbai — closest to India; change if your DB is elsew
 [build]
   dockerfile = "Dockerfile.server"
 
+# Migrations run once per deploy, before the new machines start — not on every
+# cold start. Keeps scale-to-zero fast and avoids concurrent machines
+# contending on the migration advisory lock.
+[deploy]
+  release_command = "pnpm --filter @seed/database db:deploy"
+
 [env]
   PORT            = "8080"
   NODE_ENV        = "production"
-  # Switch to "long-running" once you add Redis and want BullMQ workers.
+  # Must stay "serverless": long-running mode dispatches to BullMQ queues that
+  # no worker process consumes yet, so the server refuses to boot in that mode.
+  # Switch only once workers exist and Redis is provisioned.
   DEPLOYMENT_MODE = "serverless"
 
 [http_service]
