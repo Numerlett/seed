@@ -23,6 +23,14 @@ model SaleInvoice {
   igstAmount     Decimal        @default(0)
   cessAmount     Decimal        @default(0)
 
+  // Adjustment carrying grandTotal to the nearest rupee on the printed invoice.
+  // grandTotal itself stays unrounded so payment allocation is unaffected.
+  roundOff       Decimal        @default(0)
+  // B2B / B2C / EXPORT / SEZ, resolved from the customer's registration.
+  supplyType     String?
+  isExport       Boolean        @default(false)
+  isSEZ          Boolean        @default(false)
+
   // Payment tracking
   amountPaid     Decimal        @default(0)
   amountDue      Decimal        @default(0)
@@ -67,6 +75,7 @@ model SaleInvoiceItem {
   sgstAmount    Decimal @default(0)
   igstRate      Decimal @default(0)
   igstAmount    Decimal @default(0)
+  cessRate      Decimal @default(0)
   cessAmount    Decimal @default(0)
   totalPrice    Decimal
   costPrice     Decimal // snapshot for COGS calculation

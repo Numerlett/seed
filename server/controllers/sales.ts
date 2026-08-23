@@ -13,27 +13,15 @@ import {
   createLedgerEntry,
   validateStockAvailability,
 } from '../helpers/inventoryLedger';
+import {
+  computeDocumentTax,
+  documentTaxColumns,
+  lineTaxColumns,
+} from '../lib/tax';
 
 // =====================================================
 // SALE INVOICE CONTROLLERS
 // =====================================================
-
-function computeItemTotal(
-  quantity: number,
-  unitPrice: number,
-  taxRate: number,
-  discount: number,
-) {
-  const subtotal = quantity * unitPrice;
-  const discountAmt = subtotal * (discount / 100);
-  const afterDiscount = subtotal - discountAmt;
-  const taxAmt = afterDiscount * (taxRate / 100);
-  return {
-    totalPrice: afterDiscount + taxAmt,
-    taxAmt,
-    discountAmt,
-  };
-}
 
 /**
  * Create a new Sale Invoice (DRAFT).
@@ -48,43 +36,43 @@ export const createSaleInvoice = businessMemberProcedure
         input.documentNumber,
       );
 
-      let totalAmount = 0;
-      let taxAmount = 0;
-      let discountAmount = 0;
-
-      // Fetch cost prices for COGS snapshot
+      // Fetch cost prices for COGS snapshot and HSN codes for the GST breakup
       const productIds = [...new Set(input.items.map((i) => i.productId))];
       const products = await prisma.product.findMany({
         where: { id: { in: productIds } },
-        select: { id: true, costPrice: true },
+        select: { id: true, costPrice: true, hsnCode: true },
       });
-      const costMap = new Map(products.map((p) => [p.id, p.costPrice]));
+      const productMap = new Map(products.map((p) => [p.id, p]));
 
-      const itemsData = input.items.map((item) => {
-        const computed = computeItemTotal(
-          item.quantity,
-          item.unitPrice,
-          item.taxRate ?? 0,
-          item.discount ?? 0,
-        );
-        totalAmount += item.quantity * item.unitPrice;
-        taxAmount += computed.taxAmt;
-        discountAmount += computed.discountAmt;
-
-        return {
+      // Same engine the confirmation path uses, so a draft and the invoice it
+      // becomes never disagree about tax.
+      const tax = await computeDocumentTax(prisma, {
+        businessId: input.businessId,
+        partyId: input.customerId,
+        lines: input.items.map((item) => ({
           productId: item.productId,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
-          taxRate: item.taxRate ?? 0,
-          discount: item.discount ?? 0,
-          totalPrice: computed.totalPrice,
-          costPrice: costMap.get(item.productId) ?? new Prisma.Decimal(0),
-          shelfId: item.shelfId,
-          batchId: item.batchId,
-        };
+          taxRate: item.taxRate,
+          discount: item.discount,
+          cessRate: item.cessRate,
+          hsnCode: productMap.get(item.productId)?.hsnCode,
+        })),
       });
+      const lineTax = lineTaxColumns(tax);
 
-      const grandTotal = totalAmount - discountAmount + taxAmount;
+      const itemsData = input.items.map((item, index) => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        taxRate: item.taxRate ?? 0,
+        discount: item.discount ?? 0,
+        cessRate: item.cessRate ?? 0,
+        costPrice: productMap.get(item.productId)?.costPrice ?? new Prisma.Decimal(0),
+        shelfId: item.shelfId,
+        batchId: item.batchId,
+        ...lineTax[index],
+      }));
 
       const invoice = await prisma.saleInvoice.create({
         data: {
@@ -92,14 +80,11 @@ export const createSaleInvoice = businessMemberProcedure
           invoiceDate: input.invoiceDate ?? new Date(),
           dueDate: input.dueDate,
           notes: input.notes,
-          totalAmount,
-          taxAmount,
-          discountAmount,
-          grandTotal,
           customerId: input.customerId,
           warehouseId: input.warehouseId,
           businessId: input.businessId,
           items: { create: itemsData },
+          ...documentTaxColumns(tax),
         },
         include: {
           items: {
@@ -287,47 +272,46 @@ export const updateSaleInvoice = businessMemberProcedure
       type ScalarUpdate = Prisma.SaleInvoiceUpdateInput;
 
       if (inputItems) {
-        let totalAmount = 0;
-        let taxAmount = 0;
-        let discountAmount = 0;
-
         const productIds = [...new Set(inputItems.map((i) => i.productId))];
         const products = await prisma.product.findMany({
           where: { id: { in: productIds } },
-          select: { id: true, costPrice: true },
+          select: { id: true, costPrice: true, hsnCode: true },
         });
-        const costMap = new Map(products.map((p) => [p.id, p.costPrice]));
+        const productMap = new Map(products.map((p) => [p.id, p]));
 
-        const itemsData = inputItems.map((item) => {
-          const computed = computeItemTotal(
-            item.quantity,
-            item.unitPrice,
-            item.taxRate ?? 0,
-            item.discount ?? 0,
-          );
-          totalAmount += item.quantity * item.unitPrice;
-          taxAmount += computed.taxAmt;
-          discountAmount += computed.discountAmt;
-
-          return {
+        const tax = await computeDocumentTax(prisma, {
+          businessId: input.businessId,
+          partyId: scalarFields.customerId ?? existing.customerId,
+          lines: inputItems.map((item) => ({
             productId: item.productId,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
-            taxRate: item.taxRate ?? 0,
-            discount: item.discount ?? 0,
-            totalPrice: computed.totalPrice,
-            costPrice: costMap.get(item.productId) ?? new Prisma.Decimal(0),
-            shelfId: item.shelfId,
-            batchId: item.batchId,
-          };
+            taxRate: item.taxRate,
+            discount: item.discount,
+            cessRate: item.cessRate,
+            hsnCode: productMap.get(item.productId)?.hsnCode,
+          })),
+          isExport: existing.isExport,
+          isSEZ: existing.isSEZ,
         });
+        const lineTax = lineTaxColumns(tax);
+
+        const itemsData = inputItems.map((item, index) => ({
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          taxRate: item.taxRate ?? 0,
+          discount: item.discount ?? 0,
+          cessRate: item.cessRate ?? 0,
+          costPrice: productMap.get(item.productId)?.costPrice ?? new Prisma.Decimal(0),
+          shelfId: item.shelfId,
+          batchId: item.batchId,
+          ...lineTax[index],
+        }));
 
         const computedTotals: ScalarUpdate = {
           ...scalarFields,
-          totalAmount,
-          taxAmount,
-          discountAmount,
-          grandTotal: totalAmount - discountAmount + taxAmount,
+          ...documentTaxColumns(tax),
         };
 
         await prisma.saleInvoiceItem.deleteMany({
@@ -401,6 +385,7 @@ export const confirmSaleInvoice = businessMemberProcedure
                   name: true,
                   costPrice: true,
                   allowNegative: true,
+                  hsnCode: true,
                 },
               },
             },
@@ -423,7 +408,26 @@ export const confirmSaleInvoice = businessMemberProcedure
       }
 
       const confirmed = await prisma.$transaction(async (tx) => {
-        for (const item of invoice.items) {
+        // Freeze the GST breakup at confirmation: this is the point the invoice
+        // becomes the document the GSTR returns are built from.
+        const tax = await computeDocumentTax(tx, {
+          businessId: input.businessId,
+          partyId: invoice.customerId,
+          lines: invoice.items.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            taxRate: item.taxRate,
+            discount: item.discount,
+            cessRate: item.cessRate,
+            hsnCode: item.product.hsnCode,
+          })),
+          isExport: invoice.isExport,
+          isSEZ: invoice.isSEZ,
+        });
+        const lineTax = lineTaxColumns(tax);
+
+        for (const [index, item] of invoice.items.entries()) {
           // Validate stock availability (will throw if insufficient and allowNegative=false)
           await validateStockAvailability(tx, {
             productId: item.productId,
@@ -434,10 +438,13 @@ export const confirmSaleInvoice = businessMemberProcedure
             productName: item.product.name,
           });
 
-          // Snapshot the current costPrice on the item for COGS
+          // Snapshot the costPrice for COGS, plus this line's GST breakup
           await tx.saleInvoiceItem.update({
             where: { id: item.id },
-            data: { costPrice: item.product.costPrice },
+            data: {
+              costPrice: item.product.costPrice,
+              ...lineTax[index],
+            },
           });
 
           // Create SALE_OUT ledger entry
@@ -459,7 +466,7 @@ export const confirmSaleInvoice = businessMemberProcedure
 
         return tx.saleInvoice.update({
           where: { id: input.id },
-          data: { status: 'CONFIRMED' },
+          data: { status: 'CONFIRMED', ...documentTaxColumns(tax) },
           include: {
             items: {
               include: {

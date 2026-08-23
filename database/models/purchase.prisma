@@ -16,12 +16,19 @@ model PurchaseOrder {
   discountAmount Decimal        @default(0)
   grandTotal     Decimal        @default(0)
 
-  // GST amounts
+  // GST amounts (populated at confirmation)
   taxableAmount  Decimal        @default(0)
   cgstAmount     Decimal        @default(0)
   sgstAmount     Decimal        @default(0)
   igstAmount     Decimal        @default(0)
   cessAmount     Decimal        @default(0)
+
+  // Adjustment carrying grandTotal to the nearest rupee on the printed
+  // document. grandTotal itself stays unrounded.
+  roundOff       Decimal        @default(0)
+  // B2B here means the supplier is GST-registered, which is what makes the
+  // input tax credit on this purchase claimable.
+  supplyType     String?
 
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
@@ -42,12 +49,25 @@ model PurchaseOrder {
 }
 
 model PurchaseOrderItem {
-  id         String  @id @default(cuid())
-  quantity   Decimal
-  unitPrice  Decimal
-  taxRate    Decimal @default(0)
-  discount   Decimal @default(0)
-  totalPrice Decimal
+  id            String  @id @default(cuid())
+  quantity      Decimal
+  unitPrice     Decimal
+  taxRate       Decimal @default(0)
+  discount      Decimal @default(0)
+
+  // GST breakup (populated at confirmation) — drives input tax credit
+  taxableAmount Decimal @default(0)
+  cgstRate      Decimal @default(0)
+  cgstAmount    Decimal @default(0)
+  sgstRate      Decimal @default(0)
+  sgstAmount    Decimal @default(0)
+  igstRate      Decimal @default(0)
+  igstAmount    Decimal @default(0)
+  cessRate      Decimal @default(0)
+  cessAmount    Decimal @default(0)
+  hsnCode       String?
+
+  totalPrice    Decimal
 
   purchaseOrderId String
   purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)

@@ -1,10 +1,17 @@
 import { prisma } from '@seed/database';
 import { TRPCError } from '@trpc/server';
-import { computeInvoice, validateGstin, stateCodeFromGstin } from '@seed/tax';
+import {
+  computeInvoice,
+  toPlainNumbers,
+  validateGstin,
+  stateCodeFromGstin,
+} from '@seed/tax';
+import { resolveSellerStateCode } from '../../../lib/tax';
 
 // Built-in GST tax rates for India
 const STANDARD_TAX_RATES = [
   { id: '0', label: 'Exempt (0%)', percent: 0 },
+  { id: '0.25', label: '0.25%', percent: 0.25 },
   { id: '3', label: '3%', percent: 3 },
   { id: '5', label: '5%', percent: 5 },
   { id: '12', label: '12%', percent: 12 },
@@ -69,18 +76,30 @@ export async function computeTaxForLines(
       cessRatePercent?: number;
       hsnCode?: string;
     }>;
-    buyerStateCode: string;
+    buyerStateCode?: string;
     buyerGstin?: string;
+    isExport?: boolean;
+    isSEZ?: boolean;
+    withPaymentOfTax?: boolean;
   },
 ) {
-  const gstProfile = await prisma.gSTRegistration.findUnique({ where: { businessId } });
-  const sellerStateCode = gstProfile?.stateCode ?? '27'; // Default MH
+  // With no GST registration on file the business is not charging IGST, so the
+  // supply resolves as intra-state rather than defaulting to a hardcoded state.
+  const sellerStateCode =
+    (await resolveSellerStateCode(businessId)) ?? input.buyerStateCode ?? '';
 
-  return computeInvoice(
-    input.lines,
-    sellerStateCode,
-    input.buyerStateCode,
-    input.buyerGstin,
+  // Converted to plain numbers at the API boundary; the Decimal values are for
+  // persistence, not transport.
+  return toPlainNumbers(
+    computeInvoice({
+      lines: input.lines,
+      sellerStateCode,
+      buyerStateCode: input.buyerStateCode,
+      buyerGstin: input.buyerGstin,
+      isExport: input.isExport,
+      isSEZ: input.isSEZ,
+      withPaymentOfTax: input.withPaymentOfTax,
+    }),
   );
 }
 

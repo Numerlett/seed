@@ -13,30 +13,15 @@ import {
   DOC_PREFIXES,
 } from '../helpers/documentNumber';
 import { createLedgerEntry } from '../helpers/inventoryLedger';
+import {
+  computePurchaseTax,
+  documentTaxColumns,
+  lineTaxColumns,
+} from '../lib/tax';
 
 // =====================================================
 // PURCHASE ORDER CONTROLLERS
 // =====================================================
-
-/**
- * Helper: compute line-item total from quantity, unitPrice, taxRate, discount.
- */
-function computeItemTotal(
-  quantity: number,
-  unitPrice: number,
-  taxRate: number,
-  discount: number,
-) {
-  const subtotal = quantity * unitPrice;
-  const discountAmt = subtotal * (discount / 100);
-  const afterDiscount = subtotal - discountAmt;
-  const taxAmt = afterDiscount * (taxRate / 100);
-  return {
-    totalPrice: afterDiscount + taxAmt,
-    taxAmt,
-    discountAmt,
-  };
-}
 
 /**
  * Create a new Purchase Order (DRAFT).
@@ -51,32 +36,21 @@ export const createPurchaseOrder = businessMemberProcedure
         input.documentNumber,
       );
 
-      let totalAmount = 0;
-      let taxAmount = 0;
-      let discountAmount = 0;
-
-      const itemsData = input.items.map((item) => {
-        const computed = computeItemTotal(
-          item.quantity,
-          item.unitPrice,
-          item.taxRate ?? 0,
-          item.discount ?? 0,
-        );
-        totalAmount += item.quantity * item.unitPrice;
-        taxAmount += computed.taxAmt;
-        discountAmount += computed.discountAmt;
-
-        return {
-          productId: item.productId,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          taxRate: item.taxRate ?? 0,
-          discount: item.discount ?? 0,
-          totalPrice: computed.totalPrice,
-        };
+      const tax = await computePurchaseTax(prisma, input.businessId, {
+        supplierId: input.supplierId,
+        items: input.items,
       });
+      const lineTax = lineTaxColumns(tax);
 
-      const grandTotal = totalAmount - discountAmount + taxAmount;
+      const itemsData = input.items.map((item, index) => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        taxRate: item.taxRate ?? 0,
+        discount: item.discount ?? 0,
+        cessRate: item.cessRate ?? 0,
+        ...lineTax[index],
+      }));
 
       const po = await prisma.purchaseOrder.create({
         data: {
@@ -84,15 +58,12 @@ export const createPurchaseOrder = businessMemberProcedure
           orderDate: input.orderDate ?? new Date(),
           expectedDate: input.expectedDate,
           notes: input.notes,
-          totalAmount,
-          taxAmount,
-          discountAmount,
-          grandTotal,
           supplierId: input.supplierId,
           businessId: input.businessId,
           items: {
             create: itemsData,
           },
+          ...documentTaxColumns(tax),
         },
         include: {
           items: {
@@ -264,35 +235,23 @@ export const updatePurchaseOrder = businessMemberProcedure
 
       // If items are being updated, recalculate totals
       if (input.data.items) {
-        let totalAmount = 0;
-        let taxAmount = 0;
-        let discountAmount = 0;
-
-        const itemsData = input.data.items.map((item) => {
-          const computed = computeItemTotal(
-            item.quantity,
-            item.unitPrice,
-            item.taxRate ?? 0,
-            item.discount ?? 0,
-          );
-          totalAmount += item.quantity * item.unitPrice;
-          taxAmount += computed.taxAmt;
-          discountAmount += computed.discountAmt;
-
-          return {
-            productId: item.productId,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            taxRate: item.taxRate ?? 0,
-            discount: item.discount ?? 0,
-            totalPrice: computed.totalPrice,
-          };
+        const tax = await computePurchaseTax(prisma, input.businessId, {
+          supplierId: input.data.supplierId ?? existing.supplierId,
+          items: input.data.items,
         });
+        const lineTax = lineTaxColumns(tax);
 
-        updateData.totalAmount = totalAmount;
-        updateData.taxAmount = taxAmount;
-        updateData.discountAmount = discountAmount;
-        updateData.grandTotal = totalAmount - discountAmount + taxAmount;
+        const itemsData = input.data.items.map((item, index) => ({
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          taxRate: item.taxRate ?? 0,
+          discount: item.discount ?? 0,
+          cessRate: item.cessRate ?? 0,
+          ...lineTax[index],
+        }));
+
+        Object.assign(updateData, documentTaxColumns(tax));
 
         // Delete old items and create new ones
         delete updateData.items;
@@ -351,6 +310,7 @@ export const confirmPurchaseOrder = businessMemberProcedure
     try {
       const po = await prisma.purchaseOrder.findFirst({
         where: { id: input.id, businessId: input.businessId },
+        include: { items: true },
       });
 
       if (!po) {
@@ -367,9 +327,26 @@ export const confirmPurchaseOrder = businessMemberProcedure
         });
       }
 
-      const confirmed = await prisma.purchaseOrder.update({
-        where: { id: input.id },
-        data: { status: 'CONFIRMED' },
+      const confirmed = await prisma.$transaction(async (tx) => {
+        // Freeze the GST breakup at confirmation — this is the figure the
+        // GSTR-3B input tax credit is aggregated from.
+        const tax = await computePurchaseTax(tx, input.businessId, {
+          supplierId: po.supplierId,
+          items: po.items,
+        });
+        const lineTax = lineTaxColumns(tax);
+
+        for (const [index, item] of po.items.entries()) {
+          await tx.purchaseOrderItem.update({
+            where: { id: item.id },
+            data: lineTax[index],
+          });
+        }
+
+        return tx.purchaseOrder.update({
+          where: { id: input.id },
+          data: { status: 'CONFIRMED', ...documentTaxColumns(tax) },
+        });
       });
 
       return confirmed;
