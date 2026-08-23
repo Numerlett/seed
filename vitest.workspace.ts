@@ -14,6 +14,12 @@ export default defineWorkspace([
     },
   },
   {
+    extends: 'server/vitest.integration.config.ts',
+    test: {
+      include: ['server/tests/integration/**/*.test.ts'],
+    },
+  },
+  {
     extends: 'tax/vitest.config.ts',
     test: {
       include: ['tax/tests/**/*.test.ts'],

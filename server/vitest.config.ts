@@ -4,7 +4,9 @@ export default defineConfig({
   test: {
     name: 'server',
     environment: 'node',
-    include: ['tests/**/*.test.ts'],
+    // Integration tests need a real database, so they cannot use the setup
+    // file below — it mocks @seed/database for every test in the project.
+    include: ['tests/unit/**/*.test.ts'],
     setupFiles: ['tests/setup.ts'],
     coverage: {
       provider: 'v8',
