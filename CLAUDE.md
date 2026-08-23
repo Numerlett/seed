@@ -32,7 +32,22 @@ pnpm --filter @seed/database db:format    # Format Prisma schema files
 ```bash
 pnpm lint      # TypeScript check across all packages (tsc --noEmit)
 pnpm format    # Prettier with Tailwind plugin
+pnpm test      # Vitest across server, schemas, tax, accounting
 ```
+
+### Tests
+
+Unit suites (`server`, `schemas`, `tax`, `accounting`) mock the database and run anywhere.
+
+Integration suites under `server/tests/integration/` run the real tRPC procedures against a real Postgres. They **skip themselves** when no database is configured, so `pnpm test` stays green without one. To run them, point `TEST_DATABASE_URL` at a scratch database — never your dev database, since the fixtures create and delete rows:
+
+```bash
+TEST_DATABASE_URL="postgresql://user:pass@localhost:5432/seed_test" \
+  pnpm --filter @seed/database db:deploy   # apply migrations once
+TEST_DATABASE_URL="postgresql://user:pass@localhost:5432/seed_test" pnpm test
+```
+
+CI provides a Postgres service, so they always run there.
 
 ### Docker
 ```bash
@@ -42,7 +57,7 @@ docker run -d -p 8080:8080 --name seed-server --env-file server/.env seed-server
 
 ## Architecture
 
-SEED is a **pnpm monorepo** with five workspace packages:
+SEED is a **pnpm monorepo** with eleven workspace packages:
 
 | Package | Name | Purpose |
 |---------|------|---------|
@@ -50,7 +65,13 @@ SEED is a **pnpm monorepo** with five workspace packages:
 | `schemas/` | `@seed/schemas` | Shared Zod validation schemas |
 | `api/` | `@seed/api` | tRPC client config and React Query provider |
 | `server/` | `@seed/server` | Express + tRPC backend |
-| `web/` | `web` | Next.js 16 frontend |
+| `web/` | `@seed/web` | Next.js 16 frontend |
+| `mobile/` | `mobile` | Expo / React Native app |
+| `tax/` | `@seed/tax` | GST engine — the single source of truth for tax math |
+| `accounting/` | `@seed/accounting` | Double-entry postings and journal validation |
+| `jobs/` | `@seed/jobs` | BullMQ queue definitions (no workers yet — see below) |
+| `pdf/` | `@seed/pdf` | Invoice PDF templates |
+| `integrations/` | `@seed/integrations` | Outbound adapters (email, sms, whatsapp, e-invoice) |
 
 ### Request Lifecycle
 
@@ -79,6 +100,8 @@ Defined in [server/trpc/procedures.ts](server/trpc/procedures.ts):
 
 The backend runs in one of two modes selected by the `DEPLOYMENT_MODE` env var (`long-running` default, or `serverless`). Long-running uses Redis-backed BullMQ queues plus a separate worker process; serverless runs queueable work inline and gates scheduled features behind `longRunningOnlyProcedure`. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for full details.
 
+> **`long-running` mode currently refuses to boot.** `jobs/queues.ts` defines nine queues but no `Worker` consumes them, so queued work would be accepted and silently never run. [server/index.ts](server/index.ts) exits with an explanatory error rather than dropping mail and e-invoices. Remove that guard only when a worker process exists. Production runs `serverless`.
+
 **When adding a feature that would normally be queued** (email, sms, whatsapp, einvoice, async PDF):
 - Import from [server/lib/dispatch/](server/lib/dispatch/) — never call BullMQ queues or `@seed/integrations` adapters directly from controllers/routers.
 - The wrapper in `dispatch/` branches on `process.env.DEPLOYMENT_MODE`. Keep both paths working.
@@ -86,6 +109,13 @@ The backend runs in one of two modes selected by the `DEPLOYMENT_MODE` env var (
 **For scheduled / heavy features**: use `longRunningOnlyProcedure` from [server/trpc/procedures.ts](server/trpc/procedures.ts).
 
 **Hard rule**: `@seed/jobs` must never be statically imported from `server/`. Only [server/lib/dispatch/](server/lib/dispatch/) wrappers may dynamically `await import('@seed/jobs')`, and only inside the long-running branch. This is what keeps serverless deploys from initialising Redis.
+
+### Tax and money
+
+- **[@seed/tax](tax/engine.ts) is the only place GST is calculated.** Controllers must not compute tax inline — a second implementation in the sales controller is what left every GSTR filing reporting zero. Call [server/lib/tax/](server/lib/tax/), which resolves both parties' state codes and persists the breakup on both sales and purchases.
+- **Money is `Decimal`, never `number`.** The tax and accounting engines take `number | string | Decimal` and return `Decimal`; convert with `.toFixed(2)` when writing to Prisma and only convert to `number` at the API boundary. `Number()` on a money value in a controller is a bug.
+- Journal entries are validated by `assertPostable` from [@seed/accounting](accounting/validation.ts). Balance is checked with exact decimal equality — never a tolerance.
+- The GST breakup is frozen at **confirmation**, and the invoice PDF renders those stored figures rather than recomputing — the printed document must match what was filed.
 
 ### Authentication
 
@@ -125,45 +155,6 @@ SEED is a full business solution targeting small and medium businesses. Current 
 
 ## Environment Variables
 
-**`server/.env`** — `DATABASE_URL`, `PORT`, `NODE_ENV`, `FRONTEND_URL`, `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`, `EMAIL_*`, `GOOGLE_CLIENT_*`, `TEST_USER_EMAIL`, `TEST_USER_OTP`
+**`server/.env`** — `DATABASE_URL`, `PORT`, `NODE_ENV`, `DEPLOYMENT_MODE`, `FRONTEND_URL`, `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`, `SMTP_*`, `AWS_*`, `GOOGLE_CLIENT_*`, `TEST_MAIL`, `TEST_OTP`, and `REDIS_URL` (long-running mode only). The authoritative list is the Zod schema in [server/helpers/validateENV.ts](server/helpers/validateENV.ts) — the server refuses to boot if it fails.
 
-**`web/.env.local`** — `NEXT_PUBLIC_SERVER_BASE_URL=http://localhost:8080`
-
-<!-- code-review-graph MCP tools -->
-## MCP Tools: code-review-graph
-
-**IMPORTANT: This project has a knowledge graph. ALWAYS use the
-code-review-graph MCP tools BEFORE using Grep/Glob/Read to explore
-the codebase.** The graph is faster, cheaper (fewer tokens), and gives
-you structural context (callers, dependents, test coverage) that file
-scanning cannot.
-
-### When to use graph tools FIRST
-
-- **Exploring code**: `semantic_search_nodes` or `query_graph` instead of Grep
-- **Understanding impact**: `get_impact_radius` instead of manually tracing imports
-- **Code review**: `detect_changes` + `get_review_context` instead of reading entire files
-- **Finding relationships**: `query_graph` with callers_of/callees_of/imports_of/tests_for
-- **Architecture questions**: `get_architecture_overview` + `list_communities`
-
-Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
-
-### Key Tools
-
-| Tool | Use when |
-|------|----------|
-| `detect_changes` | Reviewing code changes � gives risk-scored analysis |
-| `get_review_context` | Need source snippets for review � token-efficient |
-| `get_impact_radius` | Understanding blast radius of a change |
-| `get_affected_flows` | Finding which execution paths are impacted |
-| `query_graph` | Tracing callers, callees, imports, tests, dependencies |
-| `semantic_search_nodes` | Finding functions/classes by name or keyword |
-| `get_architecture_overview` | Understanding high-level codebase structure |
-| `refactor_tool` | Planning renames, finding dead code |
-
-### Workflow
-
-1. The graph auto-updates on file changes (via hooks).
-2. Use `detect_changes` for code review.
-3. Use `get_affected_flows` to understand impact.
-4. Use `query_graph` pattern="tests_for" to check coverage.
+**`web/.env`** — `NEXT_PUBLIC_SERVER_BASE_URL=http://localhost:8080`
