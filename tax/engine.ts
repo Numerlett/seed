@@ -1,67 +1,126 @@
-import { TaxLineInput, TaxLineResult, TaxInvoiceResult, SupplyType } from './types';
+import Decimal from 'decimal.js';
+import {
+  Numeric,
+  SupplyType,
+  TaxInvoiceInput,
+  TaxInvoiceResult,
+  TaxLineInput,
+  TaxLineResult,
+} from './types';
+
+const ZERO = new Decimal(0);
+const HUNDRED = new Decimal(100);
+
+/** The GST rate slabs in force, including the 0.25% slab for precious stones. */
+export const GST_SLABS = [0, 0.25, 3, 5, 12, 18, 28] as const;
+
+function dec(value: Numeric | null | undefined): Decimal {
+  if (value === null || value === undefined || value === '') return ZERO;
+  return value instanceof Decimal ? value : new Decimal(value);
+}
 
 /**
- * Returns true if the transaction is inter-state (IGST applies).
- * Compares seller state code vs buyer state code (first 2 chars of GSTIN or explicit stateCode).
+ * Rounds to paise. ROUND_HALF_UP is symmetric about zero, so credit notes and
+ * other negative amounts round by the same magnitude as the sale they reverse.
  */
-export function isInterState(sellerStateCode: string, buyerStateCode: string): boolean {
-  return sellerStateCode.trim() !== buyerStateCode.trim();
+function money(value: Decimal): Decimal {
+  return value.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+}
+
+/**
+ * Returns true when IGST applies rather than CGST + SGST.
+ *
+ * A buyer with no recorded state code is not treated as a mismatch: for an
+ * unregistered recipient the place of supply is the supplier's location, so the
+ * sale is intra-state. Comparing against an empty string would charge IGST on
+ * every walk-in sale.
+ */
+export function isInterState(
+  sellerStateCode: string,
+  buyerStateCode?: string | null,
+): boolean {
+  const seller = (sellerStateCode ?? '').trim();
+  const buyer = (buyerStateCode ?? '').trim();
+  if (!buyer) return false;
+  return seller !== buyer;
 }
 
 /**
  * Resolves supply type based on buyer registration and context.
  */
 export function resolveSupplyType(
-  buyerGstin: string | undefined,
+  buyerGstin: string | null | undefined,
   isExport: boolean,
   isSEZ: boolean,
 ): SupplyType {
   if (isExport) return 'EXPORT';
   if (isSEZ) return 'SEZ';
-  if (buyerGstin && buyerGstin.length === 15) return 'B2B';
+  if (buyerGstin && buyerGstin.trim().length === 15) return 'B2B';
   return 'B2C';
 }
 
 /**
- * Rounds to 2 decimal places (banker's rounding avoided; standard for GST).
+ * Computes GST for a single line.
+ *
+ * - Inter-state: the whole rate goes to IGST.
+ * - Intra-state: the rate splits into CGST + SGST.
+ * - Zero-rated (export/SEZ under LUT): no GST and no cess.
  */
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
+export function computeLine(
+  line: TaxLineInput,
+  interState: boolean,
+  zeroRated = false,
+): TaxLineResult {
+  const quantity = dec(line.quantity);
+  const unitPrice = dec(line.unitPrice);
+  const discountAmount = dec(line.discountAmount);
+  const declaredRate = dec(line.taxRatePercent);
+  const cessRatePercent = dec(line.cessRatePercent);
 
-/**
- * Computes GST for a single line item.
- * - If inter-state: full rate goes to IGST
- * - If intra-state: rate splits equally into CGST + SGST
- */
-export function computeLine(line: TaxLineInput, interState: boolean): TaxLineResult {
-  const lineValue = line.quantity * line.unitPrice;
-  const discount = line.discountAmount ?? 0;
-  const taxableAmount = round2(lineValue - discount);
+  const taxableAmount = money(quantity.times(unitPrice).minus(discountAmount));
+  const rate = zeroRated ? ZERO : declaredRate;
 
-  const totalTaxRate = line.taxRatePercent;
-  const cessRate = line.cessRatePercent ?? 0;
+  let cgstRate = ZERO;
+  let cgstAmount = ZERO;
+  let sgstRate = ZERO;
+  let sgstAmount = ZERO;
+  let igstRate = ZERO;
+  let igstAmount = ZERO;
 
-  let cgstRate = 0, cgstAmount = 0;
-  let sgstRate = 0, sgstAmount = 0;
-  let igstRate = 0, igstAmount = 0;
+  // Round the combined tax once, then divide. Rounding each half separately
+  // overstates odd rates — 0.25% split that way yields 0.13 + 0.13 = 0.26%.
+  const totalGst = money(taxableAmount.times(rate).div(HUNDRED));
 
   if (interState) {
-    igstRate = totalTaxRate;
-    igstAmount = round2((taxableAmount * igstRate) / 100);
+    igstRate = rate;
+    igstAmount = totalGst;
   } else {
-    cgstRate = round2(totalTaxRate / 2);
-    sgstRate = round2(totalTaxRate / 2);
-    cgstAmount = round2((taxableAmount * cgstRate) / 100);
-    sgstAmount = round2((taxableAmount * sgstRate) / 100);
+    cgstRate = rate.div(2);
+    sgstRate = rate.div(2);
+    // When the total does not halve evenly, CGST takes the lower half and SGST
+    // absorbs the odd paisa, so the two always sum back to the total exactly.
+    // ROUND_DOWN truncates toward zero, keeping credit notes symmetric.
+    cgstAmount = totalGst.div(2).toDecimalPlaces(2, Decimal.ROUND_DOWN);
+    sgstAmount = totalGst.minus(cgstAmount);
   }
 
-  const cessAmount = round2((taxableAmount * cessRate) / 100);
-  const totalTax = round2(cgstAmount + sgstAmount + igstAmount + cessAmount);
-  const lineTotal = round2(taxableAmount + totalTax);
+  const cessAmount = zeroRated
+    ? ZERO
+    : money(taxableAmount.times(cessRatePercent).div(HUNDRED));
+
+  const totalTax = cgstAmount.plus(sgstAmount).plus(igstAmount).plus(cessAmount);
+  const lineTotal = taxableAmount.plus(totalTax);
 
   return {
-    ...line,
+    productId: line.productId,
+    hsnCode: line.hsnCode,
+    sacCode: line.sacCode,
+    isReverseCharge: line.isReverseCharge ?? false,
+    quantity,
+    unitPrice,
+    discountAmount,
+    taxRatePercent: declaredRate,
+    cessRatePercent,
     taxableAmount,
     cgstRate,
     cgstAmount,
@@ -76,33 +135,49 @@ export function computeLine(line: TaxLineInput, interState: boolean): TaxLineRes
 }
 
 /**
- * Computes GST for all invoice lines and returns full invoice tax summary.
+ * Computes GST across every line and returns the invoice-level summary.
+ *
+ * Totals are sums of already-rounded line values, so the breakup on the invoice
+ * always reconciles with the sum of its lines — which is what the GSTR returns
+ * are checked against.
  */
-export function computeInvoice(
-  lines: TaxLineInput[],
-  sellerStateCode: string,
-  buyerStateCode: string,
-  buyerGstin?: string,
-  isExport = false,
-  isSEZ = false,
-): TaxInvoiceResult {
-  const interState = isInterState(sellerStateCode, buyerStateCode);
-  const supplyType = resolveSupplyType(buyerGstin, isExport, isSEZ);
+export function computeInvoice(input: TaxInvoiceInput): TaxInvoiceResult {
+  const supplyType = resolveSupplyType(
+    input.buyerGstin,
+    input.isExport ?? false,
+    input.isSEZ ?? false,
+  );
 
-  const computedLines = lines.map((l) => computeLine(l, interState));
+  // Exports and SEZ supplies sit under the IGST head regardless of state, and
+  // are zero-rated unless the supplier opts to pay IGST and reclaim it.
+  const isCrossBorder = supplyType === 'EXPORT' || supplyType === 'SEZ';
+  const interState = isCrossBorder
+    ? true
+    : isInterState(input.sellerStateCode, input.buyerStateCode);
+  const isZeroRated = isCrossBorder && !input.withPaymentOfTax;
 
-  const subtotal = round2(computedLines.reduce((s, l) => s + l.quantity * l.unitPrice, 0));
-  const totalDiscount = round2(computedLines.reduce((s, l) => s + (l.discountAmount ?? 0), 0));
-  const totalTaxable = round2(computedLines.reduce((s, l) => s + l.taxableAmount, 0));
-  const totalCgst = round2(computedLines.reduce((s, l) => s + l.cgstAmount, 0));
-  const totalSgst = round2(computedLines.reduce((s, l) => s + l.sgstAmount, 0));
-  const totalIgst = round2(computedLines.reduce((s, l) => s + l.igstAmount, 0));
-  const totalCess = round2(computedLines.reduce((s, l) => s + l.cessAmount, 0));
-  const totalTax = round2(totalCgst + totalSgst + totalIgst + totalCess);
-  const grandTotal = round2(totalTaxable + totalTax);
+  const lines = input.lines.map((line) =>
+    computeLine(line, interState, isZeroRated),
+  );
+
+  const sum = (pick: (line: TaxLineResult) => Decimal): Decimal =>
+    lines.reduce((acc, line) => acc.plus(pick(line)), ZERO);
+
+  const subtotal = money(sum((l) => l.quantity.times(l.unitPrice)));
+  const totalDiscount = money(sum((l) => l.discountAmount));
+  const totalTaxable = sum((l) => l.taxableAmount);
+  const totalCgst = sum((l) => l.cgstAmount);
+  const totalSgst = sum((l) => l.sgstAmount);
+  const totalIgst = sum((l) => l.igstAmount);
+  const totalCess = sum((l) => l.cessAmount);
+  const totalTax = totalCgst.plus(totalSgst).plus(totalIgst).plus(totalCess);
+
+  const grandTotal = totalTaxable.plus(totalTax);
+  const roundedGrandTotal = grandTotal.toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+  const roundOff = roundedGrandTotal.minus(grandTotal);
 
   return {
-    lines: computedLines,
+    lines,
     subtotal,
     totalDiscount,
     totalTaxable,
@@ -112,7 +187,10 @@ export function computeInvoice(
     totalCess,
     totalTax,
     grandTotal,
+    roundOff,
+    roundedGrandTotal,
     isInterState: interState,
+    isZeroRated,
     supplyType,
   };
 }
@@ -124,10 +202,71 @@ export function stateCodeFromGstin(gstin: string): string {
   return gstin.slice(0, 2);
 }
 
+const GSTIN_CHARSET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+// State codes run 01–38; 00 and 39+ are not allocated.
+const GSTIN_PATTERN =
+  /^(0[1-9]|[12][0-9]|3[0-8])[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+
 /**
- * Validates a GSTIN format (15-char alphanumeric, known pattern).
+ * Validates a GSTIN's format, state code, and check digit.
+ *
+ * The check digit is a weighted modulo-36 sum over the first 14 characters,
+ * which catches transposed and mistyped digits that a format check alone lets
+ * through.
  */
 export function validateGstin(gstin: string): boolean {
-  const gstinPattern = /^[0-3][0-9][A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
-  return gstinPattern.test(gstin.toUpperCase());
+  const value = (gstin ?? '').trim().toUpperCase();
+  if (!GSTIN_PATTERN.test(value)) return false;
+
+  let sum = 0;
+  for (let i = 0; i < 14; i++) {
+    const codePoint = GSTIN_CHARSET.indexOf(value[i]);
+    if (codePoint < 0) return false;
+    const factor = i % 2 === 0 ? 1 : 2;
+    const product = codePoint * factor;
+    sum += Math.floor(product / 36) + (product % 36);
+  }
+
+  const expected = GSTIN_CHARSET[(36 - (sum % 36)) % 36];
+  return value[14] === expected;
+}
+
+/**
+ * Converts a computed invoice to plain numbers for transport over tRPC.
+ * Use at API boundaries only — persist the Decimal values, not these.
+ */
+export function toPlainNumbers(result: TaxInvoiceResult) {
+  const n = (value: Decimal) => value.toNumber();
+  return {
+    ...result,
+    lines: result.lines.map((line) => ({
+      ...line,
+      quantity: n(line.quantity),
+      unitPrice: n(line.unitPrice),
+      discountAmount: n(line.discountAmount),
+      taxRatePercent: n(line.taxRatePercent),
+      cessRatePercent: n(line.cessRatePercent),
+      taxableAmount: n(line.taxableAmount),
+      cgstRate: n(line.cgstRate),
+      cgstAmount: n(line.cgstAmount),
+      sgstRate: n(line.sgstRate),
+      sgstAmount: n(line.sgstAmount),
+      igstRate: n(line.igstRate),
+      igstAmount: n(line.igstAmount),
+      cessAmount: n(line.cessAmount),
+      totalTax: n(line.totalTax),
+      lineTotal: n(line.lineTotal),
+    })),
+    subtotal: n(result.subtotal),
+    totalDiscount: n(result.totalDiscount),
+    totalTaxable: n(result.totalTaxable),
+    totalCgst: n(result.totalCgst),
+    totalSgst: n(result.totalSgst),
+    totalIgst: n(result.totalIgst),
+    totalCess: n(result.totalCess),
+    totalTax: n(result.totalTax),
+    grandTotal: n(result.grandTotal),
+    roundOff: n(result.roundOff),
+    roundedGrandTotal: n(result.roundedGrandTotal),
+  };
 }

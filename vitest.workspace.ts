@@ -13,4 +13,16 @@ export default defineWorkspace([
       include: ['schemas/tests/**/*.test.ts'],
     },
   },
+  {
+    extends: 'tax/vitest.config.ts',
+    test: {
+      include: ['tax/tests/**/*.test.ts'],
+    },
+  },
+  {
+    extends: 'accounting/vitest.config.ts',
+    test: {
+      include: ['accounting/tests/**/*.test.ts'],
+    },
+  },
 ]);

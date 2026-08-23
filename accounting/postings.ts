@@ -1,4 +1,20 @@
-import { PostingLine, JournalSource } from './types';
+import Decimal from 'decimal.js';
+import { Numeric, PostingLine, JournalSource } from './types';
+
+const ZERO = new Decimal(0);
+
+function dec(value: Numeric | null | undefined): Decimal {
+  if (value === null || value === undefined || value === '') return ZERO;
+  return value instanceof Decimal ? value : new Decimal(value);
+}
+
+/**
+ * True when an amount is worth posting a line for. Compares against zero
+ * rather than using `isPositive()`, which is sign-based and returns true for 0.
+ */
+function posts(value: Numeric | null | undefined): boolean {
+  return dec(value).greaterThan(0);
+}
 
 /**
  * Standard account codes (Indian Chart of Accounts defaults).
@@ -36,10 +52,10 @@ export const ACCOUNTS = {
 } as const;
 
 type TaxAmounts = {
-  cgst: number;
-  sgst: number;
-  igst: number;
-  cess: number;
+  cgst: Numeric;
+  sgst: Numeric;
+  igst: Numeric;
+  cess: Numeric;
 };
 
 /**
@@ -47,19 +63,19 @@ type TaxAmounts = {
  */
 export function saleInvoicePosting(params: {
   partyId: string;
-  taxableAmount: number;
+  taxableAmount: Numeric;
   tax: TaxAmounts;
-  grandTotal: number;
+  grandTotal: Numeric;
 }): PostingLine[] {
   const { partyId, taxableAmount, tax, grandTotal } = params;
   const lines: PostingLine[] = [
     { accountCode: ACCOUNTS.ACCOUNTS_RECEIVABLE, debit: grandTotal, credit: 0, partyId },
     { accountCode: ACCOUNTS.SALES, debit: 0, credit: taxableAmount },
   ];
-  if (tax.cgst > 0) lines.push({ accountCode: ACCOUNTS.GST_OUTPUT_CGST, debit: 0, credit: tax.cgst });
-  if (tax.sgst > 0) lines.push({ accountCode: ACCOUNTS.GST_OUTPUT_SGST, debit: 0, credit: tax.sgst });
-  if (tax.igst > 0) lines.push({ accountCode: ACCOUNTS.GST_OUTPUT_IGST, debit: 0, credit: tax.igst });
-  if (tax.cess > 0) lines.push({ accountCode: ACCOUNTS.GST_OUTPUT_CESS, debit: 0, credit: tax.cess });
+  if (posts(tax.cgst)) lines.push({ accountCode: ACCOUNTS.GST_OUTPUT_CGST, debit: 0, credit: tax.cgst });
+  if (posts(tax.sgst)) lines.push({ accountCode: ACCOUNTS.GST_OUTPUT_SGST, debit: 0, credit: tax.sgst });
+  if (posts(tax.igst)) lines.push({ accountCode: ACCOUNTS.GST_OUTPUT_IGST, debit: 0, credit: tax.igst });
+  if (posts(tax.cess)) lines.push({ accountCode: ACCOUNTS.GST_OUTPUT_CESS, debit: 0, credit: tax.cess });
   return lines;
 }
 
@@ -68,9 +84,9 @@ export function saleInvoicePosting(params: {
  */
 export function salesReturnPosting(params: {
   partyId: string;
-  taxableAmount: number;
+  taxableAmount: Numeric;
   tax: TaxAmounts;
-  grandTotal: number;
+  grandTotal: Numeric;
 }): PostingLine[] {
   return saleInvoicePosting(params).map((l) => ({
     ...l,
@@ -84,19 +100,19 @@ export function salesReturnPosting(params: {
  */
 export function grnPosting(params: {
   partyId: string;
-  inventoryValue: number;
+  inventoryValue: Numeric;
   tax: TaxAmounts;
-  grandTotal: number;
+  grandTotal: Numeric;
 }): PostingLine[] {
   const { partyId, inventoryValue, tax, grandTotal } = params;
   const lines: PostingLine[] = [
     { accountCode: ACCOUNTS.INVENTORY, debit: inventoryValue, credit: 0 },
     { accountCode: ACCOUNTS.GR_IR_CLEARING, debit: 0, credit: grandTotal, partyId },
   ];
-  if (tax.cgst > 0) lines.push({ accountCode: ACCOUNTS.GST_INPUT_CGST, debit: tax.cgst, credit: 0 });
-  if (tax.sgst > 0) lines.push({ accountCode: ACCOUNTS.GST_INPUT_SGST, debit: tax.sgst, credit: 0 });
-  if (tax.igst > 0) lines.push({ accountCode: ACCOUNTS.GST_INPUT_IGST, debit: tax.igst, credit: 0 });
-  if (tax.cess > 0) lines.push({ accountCode: ACCOUNTS.GST_INPUT_CESS, debit: tax.cess, credit: 0 });
+  if (posts(tax.cgst)) lines.push({ accountCode: ACCOUNTS.GST_INPUT_CGST, debit: tax.cgst, credit: 0 });
+  if (posts(tax.sgst)) lines.push({ accountCode: ACCOUNTS.GST_INPUT_SGST, debit: tax.sgst, credit: 0 });
+  if (posts(tax.igst)) lines.push({ accountCode: ACCOUNTS.GST_INPUT_IGST, debit: tax.igst, credit: 0 });
+  if (posts(tax.cess)) lines.push({ accountCode: ACCOUNTS.GST_INPUT_CESS, debit: tax.cess, credit: 0 });
   return lines;
 }
 
@@ -105,7 +121,7 @@ export function grnPosting(params: {
  */
 export function purchaseInvoicePosting(params: {
   partyId: string;
-  grandTotal: number;
+  grandTotal: Numeric;
 }): PostingLine[] {
   return [
     { accountCode: ACCOUNTS.GR_IR_CLEARING, debit: params.grandTotal, credit: 0, partyId: params.partyId },
@@ -118,7 +134,7 @@ export function purchaseInvoicePosting(params: {
  */
 export function paymentReceivedPosting(params: {
   partyId: string;
-  amount: number;
+  amount: Numeric;
   bankAccountCode?: string;
 }): PostingLine[] {
   return [
@@ -132,7 +148,7 @@ export function paymentReceivedPosting(params: {
  */
 export function paymentMadePosting(params: {
   partyId: string;
-  amount: number;
+  amount: Numeric;
   bankAccountCode?: string;
 }): PostingLine[] {
   return [
@@ -144,7 +160,7 @@ export function paymentMadePosting(params: {
 /**
  * Stock write-off (damage/expired) → Stock Loss Expense Dr, Inventory Cr
  */
-export function stockWriteOffPosting(params: { amount: number }): PostingLine[] {
+export function stockWriteOffPosting(params: { amount: Numeric }): PostingLine[] {
   return [
     { accountCode: ACCOUNTS.STOCK_LOSS, debit: params.amount, credit: 0 },
     { accountCode: ACCOUNTS.INVENTORY, debit: 0, credit: params.amount },
