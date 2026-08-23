@@ -7,6 +7,7 @@ import {
   cancelSaleInvoice,
   deleteSaleInvoice,
   updatePaymentStatus,
+  getSaleInvoicePdf,
 } from '../controllers/sales';
 import { t } from '../trpc';
 
@@ -19,4 +20,5 @@ export const salesRoutes = t.router({
   cancelSaleInvoice,
   deleteSaleInvoice,
   updatePaymentStatus,
+  getSaleInvoicePdf,
 });

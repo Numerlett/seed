@@ -18,6 +18,7 @@ import {
   documentTaxColumns,
   lineTaxColumns,
 } from '../lib/tax';
+import { toInvoicePdfData } from '../lib/pdf/invoiceData';
 
 // =====================================================
 // SALE INVOICE CONTROLLERS
@@ -602,6 +603,58 @@ export const updatePaymentStatus = businessMemberProcedure
     } catch (error: unknown) {
       handleControllerError(error, {
         operation: 'update payment status',
+        userId: ctx.userId,
+      });
+    }
+  });
+
+/**
+ * Render a confirmed invoice as a PDF.
+ *
+ * Returns base64 rather than a stream because tRPC carries JSON; the client
+ * decodes it into a Blob to download. Only confirmed invoices can be rendered —
+ * a draft has no finalised GST breakup to print.
+ */
+export const getSaleInvoicePdf = businessMemberProcedure
+  .input(z.object({ id: z.string(), businessId: z.string() }))
+  .query(async ({ input, ctx }) => {
+    try {
+      const invoice = await prisma.saleInvoice.findFirst({
+        where: { id: input.id, businessId: input.businessId },
+        include: {
+          items: { include: { product: true } },
+          customer: { include: { addresses: true } },
+          business: { include: { gstRegistration: true } },
+        },
+      });
+
+      if (!invoice) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Sale invoice not found',
+        });
+      }
+
+      if (invoice.status === 'DRAFT') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Confirm the invoice before downloading it as a PDF',
+        });
+      }
+
+      // Imported lazily: @react-pdf/renderer pulls in a large dependency tree
+      // that should not load on every server boot.
+      const { generateInvoicePdf } = await import('@seed/pdf');
+      const buffer = await generateInvoicePdf(toInvoicePdfData(invoice));
+
+      return {
+        filename: `${invoice.documentNumber}.pdf`,
+        mimeType: 'application/pdf',
+        base64: buffer.toString('base64'),
+      };
+    } catch (error: unknown) {
+      handleControllerError(error, {
+        operation: 'generate invoice PDF',
         userId: ctx.userId,
       });
     }
