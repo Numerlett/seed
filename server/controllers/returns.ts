@@ -12,6 +12,53 @@ import {
   createLedgerEntry,
   validateStockAvailability,
 } from '../helpers/inventoryLedger';
+import {
+  computeReturnTax,
+  documentTaxColumns,
+  lineTaxColumns,
+  type DbClient,
+} from '../lib/tax';
+
+/**
+ * Lines of the invoice a sales return reverses, or undefined when the return
+ * is not linked to one. Used to inherit the tax that was actually charged.
+ */
+async function originalSaleLines(db: DbClient, saleInvoiceId?: string | null) {
+  if (!saleInvoiceId) return undefined;
+  return db.saleInvoiceItem.findMany({
+    where: { saleInvoiceId },
+    select: {
+      productId: true,
+      taxRate: true,
+      discount: true,
+      cessRate: true,
+      hsnCode: true,
+    },
+  });
+}
+
+/**
+ * Lines of the purchase order behind the GRN a purchase return reverses.
+ * The debit note has to reverse the input tax credit that was claimed.
+ */
+async function originalPurchaseLines(db: DbClient, grnId?: string | null) {
+  if (!grnId) return undefined;
+  const grn = await db.goodsReceiptNote.findUnique({
+    where: { id: grnId },
+    select: { purchaseOrderId: true },
+  });
+  if (!grn?.purchaseOrderId) return undefined;
+  return db.purchaseOrderItem.findMany({
+    where: { purchaseOrderId: grn.purchaseOrderId },
+    select: {
+      productId: true,
+      taxRate: true,
+      discount: true,
+      cessRate: true,
+      hsnCode: true,
+    },
+  });
+}
 
 // =====================================================
 // PURCHASE RETURN CONTROLLERS
@@ -31,16 +78,23 @@ export const createPurchaseReturn = businessMemberProcedure
         input.documentNumber,
       );
 
-      const itemsData = input.items.map((item) => ({
+      const { tax, appliedRates } = await computeReturnTax(prisma, {
+        businessId: input.businessId,
+        partyId: input.supplierId,
+        lines: input.items,
+        originalLines: await originalPurchaseLines(prisma, input.grnId),
+      });
+      const lineTax = lineTaxColumns(tax);
+
+      const itemsData = input.items.map((item, index) => ({
         productId: item.productId,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
-        totalPrice: item.quantity * item.unitPrice,
+        ...appliedRates[index],
         shelfId: item.shelfId,
         batchId: item.batchId,
+        ...lineTax[index],
       }));
-
-      const totalAmount = itemsData.reduce((sum, i) => sum + i.totalPrice, 0);
 
       const pr = await prisma.purchaseReturn.create({
         data: {
@@ -48,12 +102,12 @@ export const createPurchaseReturn = businessMemberProcedure
           returnDate: input.returnDate ?? new Date(),
           reason: input.reason,
           notes: input.notes,
-          totalAmount,
           supplierId: input.supplierId,
           grnId: input.grnId,
           warehouseId: input.warehouseId,
           businessId: input.businessId,
           items: { create: itemsData },
+          ...documentTaxColumns(tax),
         },
         include: {
           items: {
@@ -209,7 +263,17 @@ export const confirmPurchaseReturn = businessMemberProcedure
       }
 
       const confirmed = await prisma.$transaction(async (tx) => {
-        for (const item of pr.items) {
+        // Freeze the debit note at confirmation: this is what reduces the
+        // input tax credit claimed on the goods going back.
+        const { tax, appliedRates } = await computeReturnTax(tx, {
+          businessId: input.businessId,
+          partyId: pr.supplierId,
+          lines: pr.items,
+          originalLines: await originalPurchaseLines(tx, pr.grnId),
+        });
+        const lineTax = lineTaxColumns(tax);
+
+        for (const [index, item] of pr.items.entries()) {
           // Validate stock availability
           await validateStockAvailability(tx, {
             productId: item.productId,
@@ -234,11 +298,16 @@ export const confirmPurchaseReturn = businessMemberProcedure
             transactionDate: pr.returnDate,
             notes: `Purchase Return ${pr.documentNumber} - ${item.product.name}`,
           });
+
+          await tx.purchaseReturnItem.update({
+            where: { id: item.id },
+            data: { ...appliedRates[index], ...lineTax[index] },
+          });
         }
 
         return tx.purchaseReturn.update({
           where: { id: input.id },
-          data: { status: 'CONFIRMED' },
+          data: { status: 'CONFIRMED', ...documentTaxColumns(tax) },
           include: {
             items: {
               include: {
@@ -314,16 +383,23 @@ export const createSalesReturn = businessMemberProcedure
         input.documentNumber,
       );
 
-      const itemsData = input.items.map((item) => ({
+      const { tax, appliedRates } = await computeReturnTax(prisma, {
+        businessId: input.businessId,
+        partyId: input.customerId,
+        lines: input.items,
+        originalLines: await originalSaleLines(prisma, input.saleInvoiceId),
+      });
+      const lineTax = lineTaxColumns(tax);
+
+      const itemsData = input.items.map((item, index) => ({
         productId: item.productId,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
-        totalPrice: item.quantity * item.unitPrice,
+        ...appliedRates[index],
         shelfId: item.shelfId,
         batchId: item.batchId,
+        ...lineTax[index],
       }));
-
-      const totalAmount = itemsData.reduce((sum, i) => sum + i.totalPrice, 0);
 
       const sr = await prisma.salesReturn.create({
         data: {
@@ -331,12 +407,12 @@ export const createSalesReturn = businessMemberProcedure
           returnDate: input.returnDate ?? new Date(),
           reason: input.reason,
           notes: input.notes,
-          totalAmount,
           customerId: input.customerId,
           saleInvoiceId: input.saleInvoiceId,
           warehouseId: input.warehouseId,
           businessId: input.businessId,
           items: { create: itemsData },
+          ...documentTaxColumns(tax),
         },
         include: {
           items: {
@@ -491,7 +567,17 @@ export const confirmSalesReturn = businessMemberProcedure
       }
 
       const confirmed = await prisma.$transaction(async (tx) => {
-        for (const item of sr.items) {
+        // Freeze the credit note at confirmation, mirroring the invoice path:
+        // this is the figure that reduces outward liability in GSTR-3B.
+        const { tax, appliedRates } = await computeReturnTax(tx, {
+          businessId: input.businessId,
+          partyId: sr.customerId,
+          lines: sr.items,
+          originalLines: await originalSaleLines(tx, sr.saleInvoiceId),
+        });
+        const lineTax = lineTaxColumns(tax);
+
+        for (const [index, item] of sr.items.entries()) {
           // SALES_RETURN_IN increases stock
           await createLedgerEntry(tx, {
             transactionType: 'SALES_RETURN_IN',
@@ -507,11 +593,16 @@ export const confirmSalesReturn = businessMemberProcedure
             transactionDate: sr.returnDate,
             notes: `Sales Return ${sr.documentNumber} - ${item.product.name}`,
           });
+
+          await tx.salesReturnItem.update({
+            where: { id: item.id },
+            data: { ...appliedRates[index], ...lineTax[index] },
+          });
         }
 
         return tx.salesReturn.update({
           where: { id: input.id },
-          data: { status: 'CONFIRMED' },
+          data: { status: 'CONFIRMED', ...documentTaxColumns(tax) },
           include: {
             items: {
               include: {

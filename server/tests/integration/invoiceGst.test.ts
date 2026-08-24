@@ -117,6 +117,17 @@ describe.skipIf(!hasDatabase)('GST is persisted end to end', () => {
     // rejected and the fixtures leak. Errors are surfaced rather than
     // swallowed — silent cleanup failures let data accumulate unnoticed.
     if (businessId) {
+      // Returns first: they reference both the invoice they reverse and the
+      // product, so they block the deletions below.
+      await prisma.salesReturnItem.deleteMany({
+        where: { salesReturn: { businessId } },
+      });
+      await prisma.salesReturn.deleteMany({ where: { businessId } });
+      await prisma.purchaseReturnItem.deleteMany({
+        where: { purchaseReturn: { businessId } },
+      });
+      await prisma.purchaseReturn.deleteMany({ where: { businessId } });
+
       await prisma.saleInvoiceItem.deleteMany({
         where: { saleInvoice: { businessId } },
       });
@@ -228,5 +239,77 @@ describe.skipIf(!hasDatabase)('GST is persisted end to end', () => {
     expect(preview.itc.cgst).toBe(270);
     expect(preview.itc.sgst).toBe(270);
     expect(preview.itc.igst).toBe(0);
+  });
+
+  it('files a sales return as a credit note that reverses the invoice tax', async () => {
+    const invoice = await caller.sales.createSaleInvoice({
+      businessId,
+      customerId: localCustomerId,
+      warehouseId,
+      items: [{ productId, quantity: 4, unitPrice: 500, taxRate: 18, discount: 0 }],
+    });
+    await caller.sales.confirmSaleInvoice({ id: invoice.id, businessId });
+
+    // Return half the quantity. The rate is inherited from the invoice line,
+    // never re-entered — the return input carries no taxRate at all.
+    const ret = await caller.returns.createSalesReturn({
+      businessId,
+      customerId: localCustomerId,
+      warehouseId,
+      saleInvoiceId: invoice.id,
+      items: [{ productId, quantity: 2, unitPrice: 500 }],
+    });
+
+    const confirmed = await caller.returns.confirmSalesReturn({
+      id: ret.id,
+      businessId,
+    });
+
+    // 2 × 500 = 1000 taxable, 18% = 180, split intra-state.
+    expect(Number(confirmed.taxableAmount)).toBe(1000);
+    expect(Number(confirmed.cgstAmount)).toBe(90);
+    expect(Number(confirmed.sgstAmount)).toBe(90);
+    expect(Number(confirmed.taxAmount)).toBe(180);
+
+    const [line] = await prisma.salesReturnItem.findMany({
+      where: { salesReturnId: ret.id },
+    });
+    expect(Number(line.taxRate)).toBe(18);
+    expect(Number(line.cgstAmount)).toBe(90);
+    expect(line.hsnCode).toBe('8471');
+  });
+
+  it('nets credit notes off the GSTR-3B liability', async () => {
+    const now = new Date();
+    const preview = await caller.tax.getGstr3bPreview({
+      businessId,
+      month: now.getMonth() + 1,
+      year: now.getFullYear(),
+    });
+
+    // Gross outward less the credit note must equal the net payable figure.
+    expect(preview.outward.cgst).toBe(
+      preview.outwardGross.cgst - preview.creditNotes.cgst,
+    );
+    expect(preview.creditNotes.cgst).toBe(90);
+    expect(preview.outward.cgst).toBeLessThan(preview.outwardGross.cgst);
+  });
+
+  it('lists the credit note against its invoice in GSTR-1', async () => {
+    const now = new Date();
+    const preview = await caller.tax.getGstr1Preview({
+      businessId,
+      month: now.getMonth() + 1,
+      year: now.getFullYear(),
+    });
+
+    expect(preview.creditNotes).toHaveLength(1);
+    const [cn] = preview.creditNotes;
+    expect(cn.againstInvoiceNumber).toBeTruthy();
+    expect(cn.cgstAmount).toBe(90);
+
+    expect(preview.netSummary.cgst).toBe(
+      preview.summary.cgst - preview.creditNoteSummary.cgst,
+    );
   });
 });

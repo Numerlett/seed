@@ -215,18 +215,35 @@ export async function getGstr1Preview(businessId: string, month: number, year: n
   const startDate = new Date(year, month - 1, 1);
   const endDate = new Date(year, month, 0, 23, 59, 59);
 
-  const invoices = await prisma.saleInvoice.findMany({
-    where: {
-      businessId,
-      invoiceDate: { gte: startDate, lte: endDate },
-      status: 'CONFIRMED',
-    },
-    include: {
-      customer: { select: { name: true, gstin: true, stateCode: true } },
-    },
-  });
+  const [invoices, creditNotes] = await Promise.all([
+    prisma.saleInvoice.findMany({
+      where: {
+        businessId,
+        invoiceDate: { gte: startDate, lte: endDate },
+        status: 'CONFIRMED',
+      },
+      include: {
+        customer: { select: { name: true, gstin: true, stateCode: true } },
+      },
+    }),
+    // Confirmed sales returns are credit notes (GSTR-1 table 9B). They carry
+    // the invoice they reverse, which the return has to be filed against.
+    prisma.salesReturn.findMany({
+      where: {
+        businessId,
+        returnDate: { gte: startDate, lte: endDate },
+        status: 'CONFIRMED',
+      },
+      include: {
+        customer: { select: { name: true, gstin: true, stateCode: true } },
+        saleInvoice: { select: { documentNumber: true, invoiceDate: true } },
+      },
+    }),
+  ]);
 
   const b2b = invoices.filter((inv) => inv.customer?.gstin);
+  const sum = <T,>(rows: T[], pick: (row: T) => unknown) =>
+    rows.reduce((s, row) => s + (pick(row) ? Number(pick(row)) : 0), 0);
 
   return {
     period: `${month.toString().padStart(2, '0')}/${year}`,
@@ -243,11 +260,41 @@ export async function getGstr1Preview(businessId: string, month: number, year: n
       cessAmount: inv.cessAmount ? Number(inv.cessAmount) : 0,
       grandTotal: Number(inv.grandTotal),
     })),
+    creditNotes: creditNotes.map((cn) => ({
+      id: cn.id,
+      documentNumber: cn.documentNumber,
+      returnDate: cn.returnDate,
+      againstInvoiceNumber: cn.saleInvoice?.documentNumber ?? null,
+      againstInvoiceDate: cn.saleInvoice?.invoiceDate ?? null,
+      buyerGstin: cn.customer?.gstin,
+      buyerName: cn.customer?.name,
+      taxableAmount: cn.taxableAmount ? Number(cn.taxableAmount) : 0,
+      cgstAmount: cn.cgstAmount ? Number(cn.cgstAmount) : 0,
+      sgstAmount: cn.sgstAmount ? Number(cn.sgstAmount) : 0,
+      igstAmount: cn.igstAmount ? Number(cn.igstAmount) : 0,
+      cessAmount: cn.cessAmount ? Number(cn.cessAmount) : 0,
+      grandTotal: Number(cn.grandTotal),
+    })),
+    // Gross outward supply, before credit notes are applied.
     summary: {
-      taxableAmount: invoices.reduce((s, i) => s + (i.taxableAmount ? Number(i.taxableAmount) : 0), 0),
-      cgst: invoices.reduce((s, i) => s + (i.cgstAmount ? Number(i.cgstAmount) : 0), 0),
-      sgst: invoices.reduce((s, i) => s + (i.sgstAmount ? Number(i.sgstAmount) : 0), 0),
-      igst: invoices.reduce((s, i) => s + (i.igstAmount ? Number(i.igstAmount) : 0), 0),
+      taxableAmount: sum(invoices, (i) => i.taxableAmount),
+      cgst: sum(invoices, (i) => i.cgstAmount),
+      sgst: sum(invoices, (i) => i.sgstAmount),
+      igst: sum(invoices, (i) => i.igstAmount),
+    },
+    creditNoteSummary: {
+      taxableAmount: sum(creditNotes, (c) => c.taxableAmount),
+      cgst: sum(creditNotes, (c) => c.cgstAmount),
+      sgst: sum(creditNotes, (c) => c.sgstAmount),
+      igst: sum(creditNotes, (c) => c.igstAmount),
+    },
+    // What is actually payable: supplies less the credit notes against them.
+    netSummary: {
+      taxableAmount:
+        sum(invoices, (i) => i.taxableAmount) - sum(creditNotes, (c) => c.taxableAmount),
+      cgst: sum(invoices, (i) => i.cgstAmount) - sum(creditNotes, (c) => c.cgstAmount),
+      sgst: sum(invoices, (i) => i.sgstAmount) - sum(creditNotes, (c) => c.sgstAmount),
+      igst: sum(invoices, (i) => i.igstAmount) - sum(creditNotes, (c) => c.igstAmount),
     },
   };
 }
@@ -256,29 +303,76 @@ export async function getGstr3bPreview(businessId: string, month: number, year: 
   const startDate = new Date(year, month - 1, 1);
   const endDate = new Date(year, month, 0, 23, 59, 59);
 
-  const [salesAgg, purchaseAgg] = await Promise.all([
+  const gstSums = {
+    taxableAmount: true,
+    cgstAmount: true,
+    sgstAmount: true,
+    igstAmount: true,
+    cessAmount: true,
+  } as const;
+
+  const [salesAgg, purchaseAgg, creditNoteAgg, debitNoteAgg] = await Promise.all([
     prisma.saleInvoice.aggregate({
       where: { businessId, invoiceDate: { gte: startDate, lte: endDate }, status: 'CONFIRMED' },
-      _sum: { taxableAmount: true, cgstAmount: true, sgstAmount: true, igstAmount: true, cessAmount: true },
+      _sum: gstSums,
     }),
     prisma.purchaseOrder.aggregate({
       where: { businessId, orderDate: { gte: startDate, lte: endDate }, status: 'CONFIRMED' },
-      _sum: { taxableAmount: true, cgstAmount: true, sgstAmount: true, igstAmount: true, cessAmount: true },
+      _sum: gstSums,
+    }),
+    // Credit notes reduce outward liability; debit notes reduce input tax
+    // credit. Leaving them out means paying tax on refunded sales and
+    // claiming credit on goods already sent back.
+    prisma.salesReturn.aggregate({
+      where: { businessId, returnDate: { gte: startDate, lte: endDate }, status: 'CONFIRMED' },
+      _sum: gstSums,
+    }),
+    prisma.purchaseReturn.aggregate({
+      where: { businessId, returnDate: { gte: startDate, lte: endDate }, status: 'CONFIRMED' },
+      _sum: gstSums,
     }),
   ]);
 
+  const net = (
+    gross: typeof salesAgg._sum,
+    reversal: typeof salesAgg._sum,
+    field: keyof typeof salesAgg._sum,
+  ) => Number(gross[field] ?? 0) - Number(reversal[field] ?? 0);
+
   return {
     period: `${month.toString().padStart(2, '0')}/${year}`,
+    // Net of credit notes — this is the liability actually payable.
     outward: {
-      taxableAmount: salesAgg._sum.taxableAmount ? Number(salesAgg._sum.taxableAmount) : 0,
-      cgst: salesAgg._sum.cgstAmount ? Number(salesAgg._sum.cgstAmount) : 0,
-      sgst: salesAgg._sum.sgstAmount ? Number(salesAgg._sum.sgstAmount) : 0,
-      igst: salesAgg._sum.igstAmount ? Number(salesAgg._sum.igstAmount) : 0,
+      taxableAmount: net(salesAgg._sum, creditNoteAgg._sum, 'taxableAmount'),
+      cgst: net(salesAgg._sum, creditNoteAgg._sum, 'cgstAmount'),
+      sgst: net(salesAgg._sum, creditNoteAgg._sum, 'sgstAmount'),
+      igst: net(salesAgg._sum, creditNoteAgg._sum, 'igstAmount'),
     },
+    // Net of debit notes — credit cannot be claimed on returned goods.
     itc: {
-      cgst: purchaseAgg._sum.cgstAmount ? Number(purchaseAgg._sum.cgstAmount) : 0,
-      sgst: purchaseAgg._sum.sgstAmount ? Number(purchaseAgg._sum.sgstAmount) : 0,
-      igst: purchaseAgg._sum.igstAmount ? Number(purchaseAgg._sum.igstAmount) : 0,
+      cgst: net(purchaseAgg._sum, debitNoteAgg._sum, 'cgstAmount'),
+      sgst: net(purchaseAgg._sum, debitNoteAgg._sum, 'sgstAmount'),
+      igst: net(purchaseAgg._sum, debitNoteAgg._sum, 'igstAmount'),
+    },
+    // The gross figures and their reversals, kept separate so a filing can be
+    // reconciled line by line rather than only in aggregate.
+    outwardGross: {
+      taxableAmount: Number(salesAgg._sum.taxableAmount ?? 0),
+      cgst: Number(salesAgg._sum.cgstAmount ?? 0),
+      sgst: Number(salesAgg._sum.sgstAmount ?? 0),
+      igst: Number(salesAgg._sum.igstAmount ?? 0),
+    },
+    creditNotes: {
+      taxableAmount: Number(creditNoteAgg._sum.taxableAmount ?? 0),
+      cgst: Number(creditNoteAgg._sum.cgstAmount ?? 0),
+      sgst: Number(creditNoteAgg._sum.sgstAmount ?? 0),
+      igst: Number(creditNoteAgg._sum.igstAmount ?? 0),
+    },
+    debitNotes: {
+      taxableAmount: Number(debitNoteAgg._sum.taxableAmount ?? 0),
+      cgst: Number(debitNoteAgg._sum.cgstAmount ?? 0),
+      sgst: Number(debitNoteAgg._sum.sgstAmount ?? 0),
+      igst: Number(debitNoteAgg._sum.igstAmount ?? 0),
     },
   };
 }

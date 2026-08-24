@@ -168,6 +168,133 @@ export async function computePurchaseTax(
   });
 }
 
+type ReturnLineInput = {
+  productId: string;
+  quantity: Amount;
+  unitPrice: Amount;
+};
+
+/**
+ * Rates for a return line, inherited from the document it reverses.
+ *
+ * A credit note must reverse exactly the tax that was charged, so the rate
+ * comes from the original invoice or GRN line rather than being re-entered —
+ * a re-keyed rate can drift from the original, and that mismatch is what a GST
+ * audit looks for. Returns with no linked document (the link is optional) fall
+ * back to the product's current rate, which is the best available answer.
+ */
+async function resolveReturnRates(
+  db: DbClient,
+  args: {
+    productIds: string[];
+    /** Lines of the original document, if this return is linked to one. */
+    originalLines?: Array<{
+      productId: string;
+      taxRate: Amount;
+      discount?: Amount;
+      cessRate?: Amount;
+      hsnCode?: string | null;
+    }>;
+  },
+): Promise<
+  Map<string, { taxRate: Amount; discount: Amount; cessRate: Amount; hsnCode: string | null }>
+> {
+  const products = await db.product.findMany({
+    where: { id: { in: args.productIds } },
+    select: { id: true, taxRate: true, cessRate: true, hsnCode: true },
+  });
+
+  const rates = new Map<
+    string,
+    { taxRate: Amount; discount: Amount; cessRate: Amount; hsnCode: string | null }
+  >();
+
+  // Product defaults first, so an unlinked return still resolves.
+  for (const product of products) {
+    rates.set(product.id, {
+      taxRate: product.taxRate,
+      discount: 0,
+      cessRate: product.cessRate,
+      hsnCode: product.hsnCode,
+    });
+  }
+
+  // The original document wins wherever it covers the product.
+  for (const line of args.originalLines ?? []) {
+    rates.set(line.productId, {
+      taxRate: line.taxRate,
+      discount: line.discount ?? 0,
+      cessRate: line.cessRate ?? 0,
+      hsnCode: line.hsnCode ?? rates.get(line.productId)?.hsnCode ?? null,
+    });
+  }
+
+  return rates;
+}
+
+/**
+ * Computes the GST breakup for a sales or purchase return.
+ *
+ * `partyId` is the customer for a credit note and the supplier for a debit
+ * note; the inter-state comparison is symmetric either way.
+ */
+export async function computeReturnTax(
+  db: DbClient,
+  args: {
+    businessId: string;
+    partyId: string;
+    lines: ReturnLineInput[];
+    originalLines?: Array<{
+      productId: string;
+      taxRate: Amount;
+      discount?: Amount;
+      cessRate?: Amount;
+      hsnCode?: string | null;
+    }>;
+  },
+): Promise<{
+  tax: TaxInvoiceResult;
+  /**
+   * The percentage rates actually used, positionally aligned with `lines`.
+   * Returned so callers persist the same percentages the invoice stores,
+   * rather than the absolute amounts the engine works in.
+   */
+  appliedRates: Array<{ taxRate: string; discount: string; cessRate: string }>;
+}> {
+  const rates = await resolveReturnRates(db, {
+    productIds: [...new Set(args.lines.map((l) => l.productId))],
+    originalLines: args.originalLines,
+  });
+
+  const resolved = args.lines.map((line) => {
+    const rate = rates.get(line.productId);
+    return {
+      productId: line.productId,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      taxRate: rate?.taxRate ?? 0,
+      discount: rate?.discount ?? 0,
+      cessRate: rate?.cessRate ?? 0,
+      hsnCode: rate?.hsnCode ?? undefined,
+    };
+  });
+
+  const tax = await computeDocumentTax(db, {
+    businessId: args.businessId,
+    partyId: args.partyId,
+    lines: resolved,
+  });
+
+  return {
+    tax,
+    appliedRates: resolved.map((line) => ({
+      taxRate: str(line.taxRate),
+      discount: str(line.discount),
+      cessRate: str(line.cessRate),
+    })),
+  };
+}
+
 /**
  * Document-level columns to persist from a computed result.
  *

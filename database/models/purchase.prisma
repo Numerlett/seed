@@ -132,6 +132,8 @@ model GRNItem {
 }
 
 // Purchase Returns (triggers PURCHASE_RETURN_OUT ledger)
+/// A confirmed purchase return is a GST debit note: it reduces the input tax
+/// credit claimed on the goods being sent back.
 model PurchaseReturn {
   id             String         @id @default(cuid())
   documentNumber String
@@ -140,6 +142,19 @@ model PurchaseReturn {
   reason         String?
   notes          String?
   totalAmount    Decimal        @default(0)
+  discountAmount Decimal        @default(0)
+
+  // GST amounts (populated at confirmation) — reduce input tax credit
+  taxableAmount  Decimal        @default(0)
+  taxAmount      Decimal        @default(0)
+  cgstAmount     Decimal        @default(0)
+  sgstAmount     Decimal        @default(0)
+  igstAmount     Decimal        @default(0)
+  cessAmount     Decimal        @default(0)
+  grandTotal     Decimal        @default(0)
+  roundOff       Decimal        @default(0)
+  supplyType     String?
+
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
@@ -164,10 +179,25 @@ model PurchaseReturn {
 }
 
 model PurchaseReturnItem {
-  id         String  @id @default(cuid())
-  quantity   Decimal
-  unitPrice  Decimal
-  totalPrice Decimal
+  id            String  @id @default(cuid())
+  quantity      Decimal
+  unitPrice     Decimal
+  taxRate       Decimal @default(0)
+  discount      Decimal @default(0)
+
+  // GST breakup, inherited from the GRN/purchase line this reverses
+  taxableAmount Decimal @default(0)
+  cgstRate      Decimal @default(0)
+  cgstAmount    Decimal @default(0)
+  sgstRate      Decimal @default(0)
+  sgstAmount    Decimal @default(0)
+  igstRate      Decimal @default(0)
+  igstAmount    Decimal @default(0)
+  cessRate      Decimal @default(0)
+  cessAmount    Decimal @default(0)
+  hsnCode       String?
+
+  totalPrice    Decimal
 
   purchaseReturnId String
   purchaseReturn   PurchaseReturn @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
