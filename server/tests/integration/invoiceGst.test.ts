@@ -117,6 +117,12 @@ describe.skipIf(!hasDatabase)('GST is persisted end to end', () => {
     // rejected and the fixtures leak. Errors are surfaced rather than
     // swallowed — silent cleanup failures let data accumulate unnoticed.
     if (businessId) {
+      await prisma.journalLine.deleteMany({
+        where: { entry: { businessId } },
+      });
+      await prisma.journalEntry.deleteMany({ where: { businessId } });
+      await prisma.chartOfAccount.deleteMany({ where: { businessId } });
+
       // Returns first: they reference both the invoice they reverse and the
       // product, so they block the deletions below.
       await prisma.salesReturnItem.deleteMany({

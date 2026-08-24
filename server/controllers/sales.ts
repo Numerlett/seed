@@ -19,6 +19,10 @@ import {
   lineTaxColumns,
 } from '../lib/tax';
 import { toInvoicePdfData } from '../lib/pdf/invoiceData';
+// Only DRAFT invoices can be cancelled and drafts are never posted, so the
+// sales path never needs a reversal.
+import { postJournalEntry } from '../lib/accounting/post';
+import { saleInvoicePosting } from '@seed/accounting';
 
 // =====================================================
 // SALE INVOICE CONTROLLERS
@@ -464,6 +468,28 @@ export const confirmSaleInvoice = businessMemberProcedure
             notes: `Invoice ${invoice.documentNumber} - ${item.product.name}`,
           });
         }
+
+        // Books and documents commit together: a posting failure rolls the
+        // confirmation back rather than letting the ledger drift silently.
+        await postJournalEntry(tx, {
+          businessId: input.businessId,
+          source: 'SALE_INVOICE',
+          sourceId: invoice.id,
+          date: invoice.invoiceDate,
+          narration: `Sale Invoice ${invoice.documentNumber}`,
+          postedBy: ctx.userId,
+          lines: saleInvoicePosting({
+            partyId: invoice.customerId,
+            taxableAmount: tax.totalTaxable.toFixed(2),
+            tax: {
+              cgst: tax.totalCgst.toFixed(2),
+              sgst: tax.totalSgst.toFixed(2),
+              igst: tax.totalIgst.toFixed(2),
+              cess: tax.totalCess.toFixed(2),
+            },
+            grandTotal: tax.grandTotal.toFixed(2),
+          }),
+        });
 
         return tx.saleInvoice.update({
           where: { id: input.id },

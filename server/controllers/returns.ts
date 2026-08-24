@@ -18,6 +18,8 @@ import {
   lineTaxColumns,
   type DbClient,
 } from '../lib/tax';
+import { postJournalEntry } from '../lib/accounting/post';
+import { purchaseReturnPosting, salesReturnPosting } from '@seed/accounting';
 
 /**
  * Lines of the invoice a sales return reverses, or undefined when the return
@@ -304,6 +306,26 @@ export const confirmPurchaseReturn = businessMemberProcedure
             data: { ...appliedRates[index], ...lineTax[index] },
           });
         }
+
+        await postJournalEntry(tx, {
+          businessId: input.businessId,
+          source: 'PURCHASE_RETURN',
+          sourceId: pr.id,
+          date: pr.returnDate,
+          narration: `Purchase Return ${pr.documentNumber}`,
+          postedBy: ctx.userId,
+          lines: purchaseReturnPosting({
+            partyId: pr.supplierId,
+            taxableAmount: tax.totalTaxable.toFixed(2),
+            tax: {
+              cgst: tax.totalCgst.toFixed(2),
+              sgst: tax.totalSgst.toFixed(2),
+              igst: tax.totalIgst.toFixed(2),
+              cess: tax.totalCess.toFixed(2),
+            },
+            grandTotal: tax.grandTotal.toFixed(2),
+          }),
+        });
 
         return tx.purchaseReturn.update({
           where: { id: input.id },
@@ -599,6 +621,26 @@ export const confirmSalesReturn = businessMemberProcedure
             data: { ...appliedRates[index], ...lineTax[index] },
           });
         }
+
+        await postJournalEntry(tx, {
+          businessId: input.businessId,
+          source: 'SALE_RETURN',
+          sourceId: sr.id,
+          date: sr.returnDate,
+          narration: `Sales Return ${sr.documentNumber}`,
+          postedBy: ctx.userId,
+          lines: salesReturnPosting({
+            partyId: sr.customerId,
+            taxableAmount: tax.totalTaxable.toFixed(2),
+            tax: {
+              cgst: tax.totalCgst.toFixed(2),
+              sgst: tax.totalSgst.toFixed(2),
+              igst: tax.totalIgst.toFixed(2),
+              cess: tax.totalCess.toFixed(2),
+            },
+            grandTotal: tax.grandTotal.toFixed(2),
+          }),
+        });
 
         return tx.salesReturn.update({
           where: { id: input.id },

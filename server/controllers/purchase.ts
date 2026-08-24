@@ -1,4 +1,4 @@
-import { prisma } from '@seed/database';
+import { Prisma, prisma } from '@seed/database';
 import { businessMemberProcedure } from '../trpc/procedures';
 import * as z from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -18,6 +18,8 @@ import {
   documentTaxColumns,
   lineTaxColumns,
 } from '../lib/tax';
+import { postJournalEntry, reverseJournalEntry } from '../lib/accounting/post';
+import { grnPosting, supplierInvoicePosting } from '@seed/accounting';
 
 // =====================================================
 // PURCHASE ORDER CONTROLLERS
@@ -343,6 +345,26 @@ export const confirmPurchaseOrder = businessMemberProcedure
           });
         }
 
+        await postJournalEntry(tx, {
+          businessId: input.businessId,
+          source: 'PURCHASE_ORDER',
+          sourceId: po.id,
+          date: po.orderDate,
+          narration: `Purchase Order ${po.documentNumber}`,
+          postedBy: ctx.userId,
+          lines: supplierInvoicePosting({
+            partyId: po.supplierId,
+            taxableAmount: tax.totalTaxable.toFixed(2),
+            tax: {
+              cgst: tax.totalCgst.toFixed(2),
+              sgst: tax.totalSgst.toFixed(2),
+              igst: tax.totalIgst.toFixed(2),
+              cess: tax.totalCess.toFixed(2),
+            },
+            grandTotal: tax.grandTotal.toFixed(2),
+          }),
+        });
+
         return tx.purchaseOrder.update({
           where: { id: input.id },
           data: { status: 'CONFIRMED', ...documentTaxColumns(tax) },
@@ -394,6 +416,20 @@ export const cancelPurchaseOrder = businessMemberProcedure
             message: 'Cannot cancel a confirmed PO that has active GRNs',
           });
         }
+      }
+
+      // A confirmed PO carries a journal entry. Cancelling reverses it rather
+      // than deleting it, so the audit trail keeps both sides of the story.
+      if (po.status === 'CONFIRMED') {
+        await prisma.$transaction(async (tx) => {
+          await reverseJournalEntry(tx, {
+            businessId: input.businessId,
+            source: 'PURCHASE_ORDER',
+            sourceId: po.id,
+            date: new Date(),
+            narration: `Reversal of Purchase Order ${po.documentNumber}`,
+          });
+        });
       }
 
       const cancelled = await prisma.purchaseOrder.update({
@@ -717,6 +753,31 @@ export const confirmGRN = businessMemberProcedure
             notes: `GRN ${grn.documentNumber} - ${item.product.name}`,
           });
         }
+
+        // Receipt books inventory against GR/IR clearing. GST is not booked
+        // here — it enters at purchase order confirmation, which is where the
+        // tax breakup lives; GRN lines carry none.
+        const inventoryValue = grn.items
+          .reduce(
+            (sum, item) => sum.plus(new Prisma.Decimal(item.totalPrice.toString())),
+            new Prisma.Decimal(0),
+          )
+          .toFixed(2);
+
+        await postJournalEntry(tx, {
+          businessId: input.businessId,
+          source: 'GRN',
+          sourceId: grn.id,
+          date: grn.receivedDate,
+          narration: `Goods Receipt ${grn.documentNumber}`,
+          postedBy: ctx.userId,
+          lines: grnPosting({
+            partyId: grn.supplierId,
+            inventoryValue,
+            tax: { cgst: 0, sgst: 0, igst: 0, cess: 0 },
+            grandTotal: inventoryValue,
+          }),
+        });
 
         // Update GRN status
         return tx.goodsReceiptNote.update({

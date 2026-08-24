@@ -130,6 +130,49 @@ export function purchaseInvoicePosting(params: {
 }
 
 /**
+ * Supplier invoice with input GST → GR/IR Clearing Dr (taxable) + Input GST Dr,
+ * Accounts Payable Cr (grand total).
+ *
+ * This is the purchase-side counterpart of `saleInvoicePosting`: it is where
+ * input tax credit enters the books. `purchaseInvoicePosting` above is the
+ * simpler form for a purchase carrying no recoverable tax.
+ */
+export function supplierInvoicePosting(params: {
+  partyId: string;
+  taxableAmount: Numeric;
+  tax: TaxAmounts;
+  grandTotal: Numeric;
+}): PostingLine[] {
+  const { partyId, taxableAmount, tax, grandTotal } = params;
+  const lines: PostingLine[] = [
+    { accountCode: ACCOUNTS.GR_IR_CLEARING, debit: taxableAmount, credit: 0, partyId },
+  ];
+  if (posts(tax.cgst)) lines.push({ accountCode: ACCOUNTS.GST_INPUT_CGST, debit: tax.cgst, credit: 0 });
+  if (posts(tax.sgst)) lines.push({ accountCode: ACCOUNTS.GST_INPUT_SGST, debit: tax.sgst, credit: 0 });
+  if (posts(tax.igst)) lines.push({ accountCode: ACCOUNTS.GST_INPUT_IGST, debit: tax.igst, credit: 0 });
+  if (posts(tax.cess)) lines.push({ accountCode: ACCOUNTS.GST_INPUT_CESS, debit: tax.cess, credit: 0 });
+  lines.push({ accountCode: ACCOUNTS.ACCOUNTS_PAYABLE, debit: 0, credit: grandTotal, partyId });
+  return lines;
+}
+
+/**
+ * Purchase return confirmed → reverse of the supplier invoice posting.
+ * Reduces both the payable and the input tax credit claimed.
+ */
+export function purchaseReturnPosting(params: {
+  partyId: string;
+  taxableAmount: Numeric;
+  tax: TaxAmounts;
+  grandTotal: Numeric;
+}): PostingLine[] {
+  return supplierInvoicePosting(params).map((l) => ({
+    ...l,
+    debit: l.credit,
+    credit: l.debit,
+  }));
+}
+
+/**
  * Payment received → Bank/Cash Dr, Debtors Cr
  */
 export function paymentReceivedPosting(params: {
