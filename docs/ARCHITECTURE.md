@@ -28,15 +28,45 @@ SEED follows a monorepo architecture with clear separation of concerns across mu
 ### Package Dependencies
 
 ```
-web → api → server → database
-      ↓
-   @trpc/react-query
+web ─┐
+     ├→ api → server → database
+mobile ┘         │
+                 ├→ schemas    (shared Zod validation)
+                 ├→ tax        (GST engine)
+                 ├→ accounting (double-entry postings)
+                 ├→ pdf        (invoice templates)
+                 ├→ integrations (email / sms / whatsapp / e-invoice)
+                 └→ jobs       (BullMQ queues — dynamic import only)
 ```
 
-- **web**: Depends on `api` for tRPC client
+- **web** / **mobile**: Depend on `api` for the tRPC client and router types
 - **api**: Depends on `server` for router types
-- **server**: Depends on `database` for Prisma client
-- **database**: Standalone package with Prisma schema
+- **server**: Depends on `database` plus the domain packages above
+- **database**: Standalone package with the Prisma schema
+- **jobs**: Never statically imported from `server`. Only the wrappers in
+  `server/lib/dispatch/` may `await import('@seed/jobs')`, and only on the
+  long-running branch — this is what keeps serverless deploys from
+  initialising Redis.
+
+### Money and tax
+
+Two rules the domain packages exist to enforce, both learned the hard way:
+
+- **`@seed/tax` is the only place GST is calculated.** A second implementation
+  living in the sales controller is what left every GSTR filing reporting zero:
+  invoices were written by one engine and the filings read columns only the
+  other one populated. Controllers call `server/lib/tax/`, which resolves both
+  parties' state codes and persists the breakup on sales, purchases and both
+  return types.
+- **Money is `Decimal`, never `number`.** The engines accept
+  `number | string | Decimal` and return `Decimal`; convert with `.toFixed(2)`
+  at the Prisma boundary and to `number` only at the API boundary. `Number()`
+  on a money value inside a controller is a bug.
+
+Journal entries are validated by `assertPostable` from `@seed/accounting`, which
+compares debits and credits with exact decimal equality — never a tolerance.
+Confirmation posts the entry inside the same transaction that writes the
+document, so books and documents commit together or not at all.
 
 ---
 

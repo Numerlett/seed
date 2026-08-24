@@ -28,8 +28,14 @@ The backend runs in one of two modes selected by the `DEPLOYMENT_MODE` env var:
 
 | Mode | Use when | Requires Redis? | Worker process? | Scheduled jobs? |
 |---|---|---|---|---|
-| `long-running` (default) | Production with workers, dev with full feature parity, container hosts (Fly, Railway, Render, ECS) | **Yes** — `REDIS_URL` required | Yes — deploy `@seed/jobs` separately | Yes |
+| `long-running` (schema default) | Production with workers, dev with full feature parity, container hosts (Fly, Railway, Render, ECS) | **Yes** — `REDIS_URL` required | Yes — deploy `@seed/jobs` separately | Yes |
 | `serverless` | Pre-revenue / cheap deploys on Vercel, Lambda, Cloud Run scale-to-zero | No | No | **Disabled** — features that require schedulers throw `NOT_IMPLEMENTED` |
+
+> **`long-running` currently refuses to boot.** `jobs/queues.ts` defines nine
+> queues and no `Worker` consumes any of them, so queued email, SMS, PDFs and
+> e-invoices would be accepted and silently never run. `server/index.ts` exits
+> with an explanatory error instead. **Deploy in `serverless` mode** (which is
+> what `fly.toml` sets) until a worker process exists, then remove the guard.
 
 ### How features behave per mode
 
@@ -50,7 +56,7 @@ Callers in `server/` should import from `server/lib/dispatch` rather than callin
 
 ### Switching modes
 
-The default is `long-running`, so existing deployments behave the same as before. To deploy in serverless mode:
+`long-running` is the schema default but is currently guarded (see above), so deployments must set `serverless` explicitly. To deploy in serverless mode:
 
 1. Set `DEPLOYMENT_MODE=serverless` in the deploy environment.
 2. Omit `REDIS_URL` (or leave it — it's ignored).
@@ -75,7 +81,9 @@ User Browser
   └── Google OAuth redirect → backend /api/auth.googleCallback
 ```
 
-The Docker image is built from `Dockerfile.server` at the repo root. It is a multi-stage build that compiles all seven workspace packages (`database`, `schemas`, `integrations`, `jobs`, `tax`, `accounting`, `pdf`) before assembling the production runner. Migrations are applied automatically on container start via `prisma migrate deploy`.
+The Docker image is built from `Dockerfile.server` at the repo root. It is a multi-stage build that compiles all seven workspace packages (`database`, `schemas`, `integrations`, `jobs`, `tax`, `accounting`, `pdf`) before assembling the production runner.
+
+Migrations do **not** run on container start. They run once per deploy through Fly's `release_command` (see `fly.toml`), so a scale-from-zero cold start does not pay migration latency and simultaneous machine starts do not contend on the migration advisory lock. On other hosts, run `pnpm --filter @seed/database db:deploy` as a release/pre-deploy step.
 
 ---
 
@@ -177,7 +185,11 @@ docker push ACCOUNT.dkr.ecr.ap-south-1.amazonaws.com/seed-server:v1.0.0
 
 ### 3. Run the container
 
-The container automatically runs `prisma migrate deploy` before starting the server.
+The container starts the server directly. Apply migrations first, as a release step:
+
+```bash
+docker run --rm --env-file server/.env seed-server:latest \n  pnpm --filter @seed/database db:deploy
+```
 
 ```bash
 docker run -d \
@@ -281,7 +293,22 @@ gcloud run deploy seed-server \
 
 ## CI/CD Pipeline
 
-### GitHub Actions — `.github/workflows/deploy.yml`
+### Continuous integration — `.github/workflows/ci.yml`
+
+This one exists in the repo. It runs on every push to `main` and every pull
+request: install with a frozen lockfile, `pnpm build` (which generates the
+Prisma client the typecheck depends on), `pnpm lint`, then `pnpm test`. A
+Postgres 17 service container is attached so the integration suite under
+`server/tests/integration/` runs rather than skipping.
+
+Node is pinned to 24 to match `Dockerfile.server` and the `engines` floor —
+Prisma does not support Node 25.
+
+### Deployment — `.github/workflows/deploy.yml`
+
+The workflow below is a **template**, not a file in this repo. Production
+currently deploys through `fly deploy` using `fly.toml`, which runs migrations
+in its `release_command`.
 
 ```yaml
 name: Deploy
@@ -377,7 +404,7 @@ jobs:
 
 ### Run migrations
 
-Migrations run automatically on container start. To run them manually:
+Migrations run as a release step, not on container start. To run them manually:
 
 ```bash
 # Against a remote DB

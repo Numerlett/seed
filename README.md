@@ -17,7 +17,8 @@ SEED is built as a **monorepo** using **pnpm workspaces**, with clear separation
 - **OAuth**: Google OAuth 2.0 integration
 - **Type Safety**: TypeScript throughout the entire stack
 - **Containerization**: Docker support for server deployment
-- **Deployment modes**: `long-running` (Redis + BullMQ workers) or `serverless` (no Redis, no workers, scheduled features disabled). Selected via `DEPLOYMENT_MODE` env. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#deployment-modes).
+- **Deployment modes**: `long-running` (Redis + BullMQ workers) or `serverless` (no Redis, no workers, scheduled features disabled). Selected via `DEPLOYMENT_MODE` env. `long-running` currently refuses to boot because no worker consumes the queues — deploy `serverless`. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#deployment-modes).
+- **Tax and money**: [@seed/tax](tax/engine.ts) is the only place GST is computed; money is `Decimal` end to end, never `number`. The GST breakup is frozen at confirmation and the invoice PDF renders the stored figures, so the printed document matches what was filed.
 
 ---
 
@@ -284,11 +285,11 @@ Response back through chain
    GOOGLE_REDIRECT_URI=http://localhost:8080/api/auth.googleCallback
 
    # Test User (development only)
-   TEST_USER_EMAIL=test@example.com
-   TEST_USER_OTP=123456
+   TEST_MAIL=test@example.com
+   TEST_OTP=123456
    ```
 
-   **Web (`web/.env.local`):**
+   **Web (`web/.env`):**
 
    ```env
    NEXT_PUBLIC_SERVER_BASE_URL=http://localhost:8080

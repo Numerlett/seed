@@ -126,11 +126,11 @@ GOOGLE_CLIENT_SECRET=your_google_client_secret
 GOOGLE_REDIRECT_URI=http://localhost:8080/api/auth.googleCallback
 
 # Test User (development convenience)
-TEST_USER_EMAIL=test@example.com
-TEST_USER_OTP=123456
+TEST_MAIL=test@example.com
+TEST_OTP=123456
 ```
 
-#### Web Environment (`web/.env.local`)
+#### Web Environment (`web/.env`)
 
 ```env
 NEXT_PUBLIC_SERVER_BASE_URL=http://localhost:8080
@@ -365,6 +365,31 @@ export default function NewPage() {
 ---
 
 ## Testing
+
+### Automated tests
+
+```bash
+pnpm test              # every suite
+pnpm test:coverage     # with coverage
+```
+
+Unit suites (`server`, `schemas`, `tax`, `accounting`) mock the database and
+run anywhere. The `tax` and `accounting` suites cover the money paths — every
+GST slab, inter-state and export cases, and double-entry validation.
+
+Integration suites under `server/tests/integration/` call the real tRPC
+procedures against a real Postgres. They **skip themselves** when no database
+is configured, so `pnpm test` stays green without one. Point
+`TEST_DATABASE_URL` at a scratch database to run them — never your dev
+database, since the fixtures create and delete rows:
+
+```bash
+createdb seed_test
+TEST_DATABASE_URL="postgresql://user:pass@localhost:5432/seed_test"   pnpm --filter @seed/database db:deploy
+TEST_DATABASE_URL="postgresql://user:pass@localhost:5432/seed_test" pnpm test
+```
+
+CI attaches a Postgres service, so they always run there.
 
 ### Manual Testing
 
@@ -772,8 +797,8 @@ NODE_ENV=development   # Environment mode
 GOOGLE_CLIENT_ID=      # Google OAuth client ID
 GOOGLE_CLIENT_SECRET=  # Google OAuth client secret
 GOOGLE_REDIRECT_URI=   # OAuth callback URL
-TEST_USER_EMAIL=       # Test user email (dev only)
-TEST_USER_OTP=         # Test user OTP (dev only)
+TEST_MAIL=       # Test user email (dev only)
+TEST_OTP=         # Test user OTP (dev only)
 ```
 
 ### Web Required Variables

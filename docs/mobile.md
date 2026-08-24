@@ -83,8 +83,8 @@ pnpm --filter @seed/server dev
 pnpm --filter mobile start
 ```
 
-Log in with the test credentials from `server/.env` (`TEST_USER_EMAIL` /
-`TEST_USER_OTP`) — in non-production the OTP is not emailed, it's the fixed test value.
+Log in with the test credentials from `server/.env` (`TEST_MAIL` /
+`TEST_OTP`) — in non-production the OTP is not emailed, it's the fixed test value.
 
 ---
 
