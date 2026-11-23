@@ -144,6 +144,63 @@ AWS_S3_BUCKET_NAME=<bucket name>
 # TEST_OTP=
 ```
 
+### Optional integrations
+
+These are all optional. A deployment without them still boots; the features that
+depend on them refuse with `PRECONDITION_FAILED` and a message naming what is
+missing, and `system.getIntegrationStatus` reports them as unconfigured so the
+UI can disable the controls. Nothing is written to the database for an
+integration that cannot complete.
+
+```env
+# Email provider — defaults to smtp using the SMTP_* block above
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=<from Resend>
+RESEND_MAIL=noreply@yourdomain.com
+
+# SMS — msg91 (default) or twilio
+SMS_PROVIDER=msg91
+MSG91_AUTH_KEY=<key>
+MSG91_SENDER_ID=<6-char sender id>
+
+# WhatsApp — twilio (default) or gupshup
+WHATSAPP_PROVIDER=twilio
+TWILIO_ACCOUNT_SID=<sid>
+TWILIO_AUTH_TOKEN=<token>
+WHATSAPP_FROM=whatsapp:+14155238886
+
+# E-invoicing via a GST Suvidha Provider.
+# GSP_BASE_URL defaults to the NIC sandbox; the rest have no safe default.
+GSP_BASE_URL=https://einv-apisandbox.nic.in
+GSP_CLIENT_ID=<from your GSP>
+GSP_CLIENT_SECRET=<from your GSP>
+GSP_USERNAME=<IRP username>
+GSP_PASSWORD=<IRP password>
+GSP_GSTIN=<15-char GSTIN registered with the IRP>
+
+# Online payments
+RAZORPAY_KEY_ID=<key id>
+RAZORPAY_KEY_SECRET=<key secret>
+RAZORPAY_WEBHOOK_SECRET=<webhook signing secret>
+```
+
+**The webhook secret is not optional once Razorpay keys are set.** The server
+refuses to boot with keys but no `RAZORPAY_WEBHOOK_SECRET`: payment links would
+go out, customers would pay, and no confirmation could be verified — so nothing
+would ever be recorded against the invoice.
+
+After enabling Razorpay, register `https://<your-api-host>/webhooks/razorpay` in
+the Razorpay dashboard for the `payment_link.paid` event.
+
+### Graceful shutdown
+
+The server handles `SIGTERM` and `SIGINT`: it stops accepting connections, lets
+in-flight requests finish, disconnects Prisma, and exits — with a 10-second
+hard deadline in case a request hangs. Platforms that replace machines on
+deploy (Fly, ECS, Railway) send `SIGTERM` first, and without this a request
+that had written an invoice but not yet its journal entry could be cut in half.
+Give the platform at least 15 seconds of shutdown grace.
+
 ### Frontend (Web)
 
 ```env
@@ -410,6 +467,23 @@ Migrations run as a release step, not on container start. To run them manually:
 # Against a remote DB
 DATABASE_URL="postgresql://..." pnpm --filter @seed/database db:deploy
 ```
+
+### Before the next deploy: the 2026 hardening migrations
+
+`main` contains only the `init` migration; this branch adds nine more (`20260822090000` through `20260905090000`). On Fly they run automatically as the `release_command` of the next deploy, so first:
+
+1. **See what is pending** on the target database: `DATABASE_URL="postgresql://..." pnpm --filter @seed/database exec prisma migrate status`.
+2. **Back up** (see Backups below). Prisma has no down migrations.
+3. **Check what the last migration will touch.** `payment_allocation_foreign_keys` sets `invoiceId` / `billId` to NULL on any payment allocation whose document no longer exists, so that it can add foreign keys. Count them first:
+
+   ```sql
+   SELECT count(*) FROM payment_allocations pa
+   WHERE (pa."invoiceId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sale_invoices si WHERE si.id = pa."invoiceId"))
+      OR (pa."billId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM purchase_orders po WHERE po.id = pa."billId"));
+   ```
+
+4. `costing_weighted_average_only` rebuilds the `CostingMethod` enum and briefly locks `businesses`. Any business set to FIFO becomes weighted average, which is what its books already used.
+5. **After deploying**, run the reconciliation query in [HANDOVER.md](HANDOVER.md#reconcile-historical-books). Purchase returns, stock adjustments and damage reports confirmed before the posting fixes never reached the Inventory account.
 
 ### Rollback a migration
 

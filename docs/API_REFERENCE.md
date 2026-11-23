@@ -636,8 +636,16 @@ All tRPC procedures can throw errors with the following structure:
 | `FORBIDDEN`             | 403         | Valid auth but insufficient permissions |
 | `NOT_FOUND`             | 404         | Resource doesn't exist                  |
 | `BAD_REQUEST`           | 400         | Invalid input data                      |
+| `PRECONDITION_FAILED`   | 412         | Feature needs an integration this server has no credentials for |
 | `TOO_MANY_REQUESTS`     | 429         | Rate limit exceeded                     |
+| `NOT_IMPLEMENTED`       | 501         | Feature requires the long-running deployment |
 | `INTERNAL_SERVER_ERROR` | 500         | Server error                            |
+| `BAD_GATEWAY`           | 502         | An upstream provider (IRP, payment gateway) rejected the request |
+
+`PRECONDITION_FAILED` is not a client mistake. It means the deployment has no
+credentials for the integration the call needs — e-invoicing without a GSP, or
+an email send with no SMTP settings. Query `system.getIntegrationStatus` first
+and present the feature as unavailable rather than letting the user trigger it.
 
 ---
 
@@ -728,28 +736,129 @@ const user = await trpc.auth.getUser();
 
 ## Rate Limiting
 
-Current rate limits:
+Two layers apply. A coarse Express limiter covers the whole `/api` mount at 300
+requests per minute per IP. Per-procedure limits run inside the tRPC middleware
+chain (`server/trpc/rateLimit.ts`) rather than as path middleware, because a
+batched call to `/api/a.proc,b.proc` does not match a limiter mounted on
+`/api/a.proc`.
 
-| Endpoint          | Limit      | Window          |
-| ----------------- | ---------- | --------------- |
-| `auth.emailLogin` | 1 request  | 60 seconds      |
-| `auth.verifyOTP`  | 5 attempts | Per OTP session |
+| Endpoint                 | Limit       | Window     |
+| ------------------------ | ----------- | ---------- |
+| `auth.emailLogin`        | 5 requests  | 15 minutes |
+| `auth.emailVerify`       | 10 attempts | 15 minutes |
+| `auth.getNewAccessToken` | 30 requests | 15 minutes |
+| `auth.googleAuthCallback` / `auth.googleSignInMobile` | 20 requests (shared budget) | 15 minutes |
+| `POST /webhooks/razorpay` | 120 requests | 60 seconds |
+| Everything under `/api`  | 300 requests | 60 seconds |
 
-_Global rate limiting to be implemented_
+`auth.emailLogin` additionally refuses a second OTP for the same address within
+60 seconds. That check is a database lookup, so it holds across instances —
+the in-memory counters above do not, and a multi-instance deployment should
+move them to a shared store.
 
 ---
 
 ## Webhooks
 
-_Not yet implemented_
+### `POST /webhooks/razorpay`
 
-Planned webhook events:
+Receives payment notifications from Razorpay. This is a plain Express route, not
+a tRPC procedure, and it is unauthenticated — trust comes from the HMAC
+signature, not from a session.
 
-- `user.created`
-- `user.updated`
-- `business.created`
-- `business.updated`
-- `business.deleted`
+- Mounted **before** `express.json()` with `express.raw()`. The signature is an
+  HMAC-SHA256 over the exact bytes Razorpay sent; a re-serialised body will
+  never match.
+- The `x-razorpay-signature` header is verified with a timing-safe comparison
+  against `RAZORPAY_WEBHOOK_SECRET`. The server refuses to boot with Razorpay
+  keys set but no webhook secret, since links would go out that could never be
+  reconciled.
+- Only `payment_link.paid` moves money. Other events are acknowledged with 200
+  so the provider stops resending them.
+- Settlement is idempotent: `payment_links.providerPaymentId` is unique and a
+  link already marked `PAID` is left alone, so the retries every gateway sends
+  cannot record the same money twice.
+
+Responses follow the provider's retry contract — 2xx means "do not resend".
+Only a genuine server-side failure returns 5xx, which is the case where a retry
+might succeed.
+
+| Status | Meaning                                                   |
+| ------ | --------------------------------------------------------- |
+| 200    | Processed, or deliberately ignored (unknown event / link) |
+| 400    | Missing signature or malformed JSON                       |
+| 401    | Signature verification failed                             |
+| 503    | `RAZORPAY_WEBHOOK_SECRET` is not configured               |
+
+Planned (not implemented): outbound webhooks for `user.*` and `business.*`
+events.
+
+---
+
+## Accounting Routes (`accounting.*`)
+
+### `accounting.getTrialBalance`
+
+`{ businessId, asOf? }` → `{ rows, totals }`. Aggregated in the database and
+summed as `Decimal`; the conversion to `number` happens once, on the way out.
+
+### `accounting.getProfitAndLoss`
+
+`{ businessId, dateFrom, dateTo }` → `{ revenue, expenses, netProfit,
+incomeLines, expenseLines }`.
+
+### `accounting.getBalanceSheet`
+
+`{ businessId, asOf }` → the statement as at a date:
+
+| Field | Meaning |
+| ----- | ------- |
+| `assets` / `liabilities` / `equity` | Account rows, each with `debit` and `credit` |
+| `totalAssets` | Positive magnitude, debit-normal |
+| `totalLiabilities` / `totalEquity` | Positive magnitudes, credit-normal |
+| `retainedEarnings` | Current-period profit, computed from income and expense |
+| `difference` | `totalAssets - totalLiabilities - totalEquity`; exactly `0` for a correct ledger |
+| `balanced` | Whether `difference` is zero |
+
+There are no closing entries in this system, so current-period earnings are
+computed rather than posted, and appear in `equity` as a synthetic
+`3900 — Current Period Earnings (computed)` row. Before this existed the
+statement summed only asset, liability and equity accounts and was out by
+exactly the period's profit, always.
+
+**Clients must use `balanced` / `difference` rather than recomputing the check
+from the totals** — the totals are magnitudes in each section's natural
+direction, not signed values.
+
+### Date bounds
+
+`asOf` and `dateTo` are inclusive of the whole day named. Clients build them
+from `YYYY-MM-DD`, which parses as midnight, so the server extends the bound to
+23:59:59.999 UTC; otherwise every document dated on the closing day would be
+excluded from the report that is supposed to cover it.
+
+---
+
+## System Routes (`system.*`)
+
+### `system.getIntegrationStatus`
+
+Authenticated. Returns which outbound integrations this deployment has
+credentials for, so the UI can present a feature as unavailable instead of
+letting the user trigger a call that can only fail.
+
+```ts
+const status = await clientTrpc.system.getIntegrationStatus.query();
+// [{ id: 'einvoice', configured: false, provider: undefined }, ...]
+```
+
+Ids are `email`, `sms`, `whatsapp`, `einvoice` and `razorpay`. The names of the
+missing environment variables are deliberately not returned; they appear in the
+error message raised when the feature is actually used, and in server logs.
+
+### `system.getDeploymentMode`
+
+Authenticated. Returns `{ mode: 'serverless' | 'long-running' }`.
 
 ---
 

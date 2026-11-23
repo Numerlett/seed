@@ -8,18 +8,18 @@ This guide will help you set up your development environment and understand the 
 
 ### Required Software
 
-1. **Node.js** (v20+)
+1. **Node.js** (v24+)
 
    ```bash
-   node --version  # Should be v20 or higher
+   node --version  # Should be v24 or higher (the root package.json requires it; CI runs 24)
    ```
 
    Download from: https://nodejs.org/
 
-2. **pnpm** (v8+)
+2. **pnpm** (v11, pinned by `packageManager` in the root package.json)
 
    ```bash
-   npm install -g pnpm
+   corepack enable   # installs the pinned pnpm version
    pnpm --version
    ```
 

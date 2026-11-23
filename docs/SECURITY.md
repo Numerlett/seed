@@ -331,6 +331,47 @@ async function cleanupExpiredTokens() {
 
 ## API Security
 
+### Security Headers
+
+`helmet` is applied to every response. Three of its defaults are turned off
+deliberately, because this server is a JSON API for a frontend on a different
+origin rather than a document server:
+
+| Setting | State | Why |
+| ------- | ----- | --- |
+| `contentSecurityPolicy` | off | CSP governs pages this server does not render. |
+| `crossOriginEmbedderPolicy` | off | Breaks the cross-origin fetches the SPA depends on. |
+| `crossOriginResourcePolicy` | `cross-origin` | The default `same-origin` would stop the frontend reading responses at all. |
+
+Request bodies are capped at 1 MB.
+
+### Webhook Signature Verification
+
+`POST /webhooks/razorpay` is unauthenticated — it is a public endpoint whose
+trust comes entirely from an HMAC-SHA256 signature.
+
+- Mounted **before** `express.json()` using `express.raw()`. The HMAC is over
+  the exact bytes sent; a re-serialised body changes key order and whitespace
+  and would never verify. The handler rejects a non-Buffer body rather than
+  silently trusting a parsed one.
+- The comparison uses `crypto.timingSafeEqual`, not `===`. A plain equality
+  check leaks how much of a forged signature was correct, which is enough to
+  reconstruct a valid one byte at a time.
+- Length mismatches return false rather than throwing.
+- The failure response says only that the signature was invalid — a forged
+  request learns nothing about which part failed.
+- The server refuses to boot with Razorpay keys set but no
+  `RAZORPAY_WEBHOOK_SECRET`, so it is not possible to accept payments that can
+  never be verified.
+
+### Graceful Shutdown
+
+`SIGTERM`/`SIGINT` stop new connections, drain in-flight requests, disconnect
+Prisma and exit, with a 10-second hard deadline. This is a correctness property
+as much as an availability one: a request that has written an invoice but not
+yet its journal entry must not be severed mid-transaction. `unhandledRejection`
+and `uncaughtException` are routed through the structured logger.
+
 ### CORS Configuration
 
 ```typescript
