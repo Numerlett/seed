@@ -5,12 +5,11 @@ import * as z from 'zod';
 import { TRPCError } from '@trpc/server';
 import { saleInvoiceSchema, saleInvoiceUpdateSchema } from '@seed/schemas';
 import { handleControllerError } from '../helpers/controllerErrorHandler';
-import {
-  generateDocumentNumber,
-  DOC_PREFIXES,
-} from '../helpers/documentNumber';
+import { withDocumentNumber, DOC_PREFIXES } from '../helpers/documentNumber';
 import {
   createLedgerEntry,
+  lockProductsForUpdate,
+  resolveOutboundCost,
   validateStockAvailability,
 } from '../helpers/inventoryLedger';
 import {
@@ -35,12 +34,6 @@ export const createSaleInvoice = businessMemberProcedure
   .input(saleInvoiceSchema)
   .mutation(async ({ input, ctx }) => {
     try {
-      const documentNumber = await generateDocumentNumber(
-        input.businessId,
-        DOC_PREFIXES.SALE_INVOICE,
-        input.documentNumber,
-      );
-
       // Fetch cost prices for COGS snapshot and HSN codes for the GST breakup
       const productIds = [...new Set(input.items.map((i) => i.productId))];
       const products = await prisma.product.findMany({
@@ -73,34 +66,44 @@ export const createSaleInvoice = businessMemberProcedure
         taxRate: item.taxRate ?? 0,
         discount: item.discount ?? 0,
         cessRate: item.cessRate ?? 0,
-        costPrice: productMap.get(item.productId)?.costPrice ?? new Prisma.Decimal(0),
+        costPrice:
+          productMap.get(item.productId)?.costPrice ?? new Prisma.Decimal(0),
         shelfId: item.shelfId,
         batchId: item.batchId,
         ...lineTax[index],
       }));
 
-      const invoice = await prisma.saleInvoice.create({
-        data: {
-          documentNumber,
-          invoiceDate: input.invoiceDate ?? new Date(),
-          dueDate: input.dueDate,
-          notes: input.notes,
-          customerId: input.customerId,
-          warehouseId: input.warehouseId,
-          businessId: input.businessId,
-          items: { create: itemsData },
-          ...documentTaxColumns(tax),
-        },
-        include: {
-          items: {
-            include: {
-              product: { select: { id: true, name: true, sku: true } },
+      // Numbered inside the retry: two invoices created at the same instant
+      // would otherwise read the same maximum and one would fail on the
+      // per-business unique with nothing the user could do about it.
+      const invoice = await withDocumentNumber(
+        input.businessId,
+        DOC_PREFIXES.SALE_INVOICE,
+        input.documentNumber,
+        (documentNumber) =>
+          prisma.saleInvoice.create({
+            data: {
+              documentNumber,
+              invoiceDate: input.invoiceDate ?? new Date(),
+              dueDate: input.dueDate,
+              notes: input.notes,
+              customerId: input.customerId,
+              warehouseId: input.warehouseId,
+              businessId: input.businessId,
+              items: { create: itemsData },
+              ...documentTaxColumns(tax),
             },
-          },
-          customer: { select: { id: true, name: true } },
-          warehouse: { select: { id: true, name: true } },
-        },
-      });
+            include: {
+              items: {
+                include: {
+                  product: { select: { id: true, name: true, sku: true } },
+                },
+              },
+              customer: { select: { id: true, name: true } },
+              warehouse: { select: { id: true, name: true } },
+            },
+          }),
+      );
 
       return invoice;
     } catch (error: unknown) {
@@ -308,7 +311,8 @@ export const updateSaleInvoice = businessMemberProcedure
           taxRate: item.taxRate ?? 0,
           discount: item.discount ?? 0,
           cessRate: item.cessRate ?? 0,
-          costPrice: productMap.get(item.productId)?.costPrice ?? new Prisma.Decimal(0),
+          costPrice:
+            productMap.get(item.productId)?.costPrice ?? new Prisma.Decimal(0),
           shelfId: item.shelfId,
           batchId: item.batchId,
           ...lineTax[index],
@@ -413,6 +417,14 @@ export const confirmSaleInvoice = businessMemberProcedure
       }
 
       const confirmed = await prisma.$transaction(async (tx) => {
+        // Taken before anything is read: availability and the weighted-average
+        // cost are both read-then-write, so two confirmations racing on the
+        // same stock would otherwise both pass the check and both deduct.
+        await lockProductsForUpdate(
+          tx,
+          invoice.items.map((item) => item.productId),
+        );
+
         // Freeze the GST breakup at confirmation: this is the point the invoice
         // becomes the document the GSTR returns are built from.
         const tax = await computeDocumentTax(tx, {
@@ -432,6 +444,8 @@ export const confirmSaleInvoice = businessMemberProcedure
         });
         const lineTax = lineTaxColumns(tax);
 
+        let costOfGoods = new Prisma.Decimal(0);
+
         for (const [index, item] of invoice.items.entries()) {
           // Validate stock availability (will throw if insufficient and allowNegative=false)
           await validateStockAvailability(tx, {
@@ -443,11 +457,26 @@ export const confirmSaleInvoice = businessMemberProcedure
             productName: item.product.name,
           });
 
-          // Snapshot the costPrice for COGS, plus this line's GST breakup
+          // The weighted-average cost of what is actually on the shelf, read
+          // before this line is issued. `Product.costPrice` was used here, and
+          // no receipt ever updates it, so COGS and the value removed from
+          // inventory were both whatever was typed when the product was made.
+          const unitCost = await resolveOutboundCost(tx, {
+            productId: item.productId,
+            warehouseId: invoice.warehouseId,
+            shelfId: item.shelfId,
+            batchId: item.batchId,
+          });
+          costOfGoods = costOfGoods.plus(unitCost.mul(item.quantity));
+
+          // Snapshot the cost for COGS, plus this line's GST breakup. Frozen
+          // at confirmation for the same reason the tax breakup is: the margin
+          // reported on this sale must not move when later receipts change the
+          // running average.
           await tx.saleInvoiceItem.update({
             where: { id: item.id },
             data: {
-              costPrice: item.product.costPrice,
+              costPrice: unitCost.toFixed(2),
               ...lineTax[index],
             },
           });
@@ -461,7 +490,7 @@ export const confirmSaleInvoice = businessMemberProcedure
             batchId: item.batchId,
             businessId: input.businessId,
             quantity: item.quantity,
-            unitCost: item.product.costPrice,
+            unitCost,
             referenceTable: 'sale_invoices',
             referenceId: invoice.id,
             transactionDate: invoice.invoiceDate,
@@ -488,6 +517,7 @@ export const confirmSaleInvoice = businessMemberProcedure
               cess: tax.totalCess.toFixed(2),
             },
             grandTotal: tax.grandTotal.toFixed(2),
+            costOfGoods: costOfGoods.toFixed(2),
           }),
         });
 
@@ -579,7 +609,15 @@ export const deleteSaleInvoice = businessMemberProcedure
         });
       }
 
-      await prisma.saleInvoice.delete({ where: { id: input.id } });
+      const removed = await prisma.saleInvoice.deleteMany({
+        where: { id: input.id, businessId: input.businessId },
+      });
+      if (removed.count === 0) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Sale invoice not found',
+        });
+      }
       return { success: true };
     } catch (error: unknown) {
       handleControllerError(error, {

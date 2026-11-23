@@ -1,15 +1,13 @@
-import { prisma } from '@seed/database';
+import { prisma, Prisma } from '@seed/database';
 import { businessMemberProcedure } from '../trpc/procedures';
 import * as z from 'zod';
 import { TRPCError } from '@trpc/server';
 import { purchaseReturnSchema, salesReturnSchema } from '@seed/schemas';
 import { handleControllerError } from '../helpers/controllerErrorHandler';
-import {
-  generateDocumentNumber,
-  DOC_PREFIXES,
-} from '../helpers/documentNumber';
+import { withDocumentNumber, DOC_PREFIXES } from '../helpers/documentNumber';
 import {
   createLedgerEntry,
+  lockProductsForUpdate,
   validateStockAvailability,
 } from '../helpers/inventoryLedger';
 import {
@@ -19,7 +17,11 @@ import {
   type DbClient,
 } from '../lib/tax';
 import { postJournalEntry } from '../lib/accounting/post';
-import { purchaseReturnPosting, salesReturnPosting } from '@seed/accounting';
+import {
+  purchaseReturnPosting,
+  purchaseReturnStockPosting,
+  salesReturnPosting,
+} from '@seed/accounting';
 
 /**
  * Lines of the invoice a sales return reverses, or undefined when the return
@@ -37,6 +39,34 @@ async function originalSaleLines(db: DbClient, saleInvoiceId?: string | null) {
       hsnCode: true,
     },
   });
+}
+
+/**
+ * Cost per product frozen on the invoice a sales return credits.
+ *
+ * Confirmation snapshots the weighted-average cost each line was issued at, so
+ * a return can restore inventory at exactly the value the sale removed. Without
+ * it the two sides of the same goods use different costs and inventory drifts
+ * every time something comes back.
+ */
+async function originalSaleCosts(
+  db: DbClient,
+  saleInvoiceId?: string | null,
+): Promise<Map<string, Prisma.Decimal>> {
+  const costs = new Map<string, Prisma.Decimal>();
+  if (!saleInvoiceId) return costs;
+
+  const lines = await db.saleInvoiceItem.findMany({
+    where: { saleInvoiceId },
+    select: { productId: true, costPrice: true },
+  });
+
+  for (const line of lines) {
+    if (line.costPrice !== null && line.costPrice !== undefined) {
+      costs.set(line.productId, new Prisma.Decimal(line.costPrice.toString()));
+    }
+  }
+  return costs;
 }
 
 /**
@@ -74,12 +104,6 @@ export const createPurchaseReturn = businessMemberProcedure
   .input(purchaseReturnSchema)
   .mutation(async ({ input, ctx }) => {
     try {
-      const documentNumber = await generateDocumentNumber(
-        input.businessId,
-        DOC_PREFIXES.PURCHASE_RETURN,
-        input.documentNumber,
-      );
-
       const { tax, appliedRates } = await computeReturnTax(prisma, {
         businessId: input.businessId,
         partyId: input.supplierId,
@@ -98,29 +122,35 @@ export const createPurchaseReturn = businessMemberProcedure
         ...lineTax[index],
       }));
 
-      const pr = await prisma.purchaseReturn.create({
-        data: {
-          documentNumber,
-          returnDate: input.returnDate ?? new Date(),
-          reason: input.reason,
-          notes: input.notes,
-          supplierId: input.supplierId,
-          grnId: input.grnId,
-          warehouseId: input.warehouseId,
-          businessId: input.businessId,
-          items: { create: itemsData },
-          ...documentTaxColumns(tax),
-        },
-        include: {
-          items: {
-            include: {
-              product: { select: { id: true, name: true, sku: true } },
+      const pr = await withDocumentNumber(
+        input.businessId,
+        DOC_PREFIXES.PURCHASE_RETURN,
+        input.documentNumber,
+        (documentNumber) =>
+          prisma.purchaseReturn.create({
+            data: {
+              documentNumber,
+              returnDate: input.returnDate ?? new Date(),
+              reason: input.reason,
+              notes: input.notes,
+              supplierId: input.supplierId,
+              grnId: input.grnId,
+              warehouseId: input.warehouseId,
+              businessId: input.businessId,
+              items: { create: itemsData },
+              ...documentTaxColumns(tax),
             },
-          },
-          supplier: { select: { id: true, name: true } },
-          warehouse: { select: { id: true, name: true } },
-        },
-      });
+            include: {
+              items: {
+                include: {
+                  product: { select: { id: true, name: true, sku: true } },
+                },
+              },
+              supplier: { select: { id: true, name: true } },
+              warehouse: { select: { id: true, name: true } },
+            },
+          }),
+      );
 
       return pr;
     } catch (error: unknown) {
@@ -265,6 +295,14 @@ export const confirmPurchaseReturn = businessMemberProcedure
       }
 
       const confirmed = await prisma.$transaction(async (tx) => {
+        // Availability is checked and then acted on, so the products are
+        // locked for the duration to stop a concurrent movement invalidating
+        // the check between the two.
+        await lockProductsForUpdate(
+          tx,
+          pr.items.map((item) => item.productId),
+        );
+
         // Freeze the debit note at confirmation: this is what reduces the
         // input tax credit claimed on the goods going back.
         const { tax, appliedRates } = await computeReturnTax(tx, {
@@ -274,6 +312,15 @@ export const confirmPurchaseReturn = businessMemberProcedure
           originalLines: await originalPurchaseLines(tx, pr.grnId),
         });
         const lineTax = lineTaxColumns(tax);
+
+        // Unlike every other issue path, a purchase return does not use the
+        // weighted average (`resolveOutboundCost`). It reverses a specific
+        // receipt, and the supplier credits the price that receipt was invoiced
+        // at, so stock leaves at the price on the return line. That keeps the
+        // Inventory account, the stock subledger and the debit note in
+        // agreement; costing it at the average would leave a price difference
+        // with nowhere to post.
+        let stockRelieved = new Prisma.Decimal(0);
 
         for (const [index, item] of pr.items.entries()) {
           // Validate stock availability
@@ -285,6 +332,12 @@ export const confirmPurchaseReturn = businessMemberProcedure
             requiredQuantity: item.quantity,
             productName: item.product.name,
           });
+
+          stockRelieved = stockRelieved.plus(
+            new Prisma.Decimal(item.quantity.toString()).mul(
+              new Prisma.Decimal(item.unitPrice.toString()),
+            ),
+          );
 
           await createLedgerEntry(tx, {
             transactionType: 'PURCHASE_RETURN_OUT',
@@ -314,17 +367,26 @@ export const confirmPurchaseReturn = businessMemberProcedure
           date: pr.returnDate,
           narration: `Purchase Return ${pr.documentNumber}`,
           postedBy: ctx.userId,
-          lines: purchaseReturnPosting({
-            partyId: pr.supplierId,
-            taxableAmount: tax.totalTaxable.toFixed(2),
-            tax: {
-              cgst: tax.totalCgst.toFixed(2),
-              sgst: tax.totalSgst.toFixed(2),
-              igst: tax.totalIgst.toFixed(2),
-              cess: tax.totalCess.toFixed(2),
-            },
-            grandTotal: tax.grandTotal.toFixed(2),
-          }),
+          lines: [
+            // Supplier leg: reduces the payable and the input tax credit.
+            ...purchaseReturnPosting({
+              partyId: pr.supplierId,
+              taxableAmount: tax.totalTaxable.toFixed(2),
+              tax: {
+                cgst: tax.totalCgst.toFixed(2),
+                sgst: tax.totalSgst.toFixed(2),
+                igst: tax.totalIgst.toFixed(2),
+                cess: tax.totalCess.toFixed(2),
+              },
+              grandTotal: tax.grandTotal.toFixed(2),
+            }),
+            // Stock leg: the goods have left, so Inventory must say so. The
+            // supplier leg alone credited GR/IR and left Inventory overstated.
+            ...purchaseReturnStockPosting({
+              partyId: pr.supplierId,
+              inventoryValue: stockRelieved.toFixed(2),
+            }),
+          ],
         });
 
         return tx.purchaseReturn.update({
@@ -399,12 +461,6 @@ export const createSalesReturn = businessMemberProcedure
   .input(salesReturnSchema)
   .mutation(async ({ input, ctx }) => {
     try {
-      const documentNumber = await generateDocumentNumber(
-        input.businessId,
-        DOC_PREFIXES.SALES_RETURN,
-        input.documentNumber,
-      );
-
       const { tax, appliedRates } = await computeReturnTax(prisma, {
         businessId: input.businessId,
         partyId: input.customerId,
@@ -423,29 +479,35 @@ export const createSalesReturn = businessMemberProcedure
         ...lineTax[index],
       }));
 
-      const sr = await prisma.salesReturn.create({
-        data: {
-          documentNumber,
-          returnDate: input.returnDate ?? new Date(),
-          reason: input.reason,
-          notes: input.notes,
-          customerId: input.customerId,
-          saleInvoiceId: input.saleInvoiceId,
-          warehouseId: input.warehouseId,
-          businessId: input.businessId,
-          items: { create: itemsData },
-          ...documentTaxColumns(tax),
-        },
-        include: {
-          items: {
-            include: {
-              product: { select: { id: true, name: true, sku: true } },
+      const sr = await withDocumentNumber(
+        input.businessId,
+        DOC_PREFIXES.SALES_RETURN,
+        input.documentNumber,
+        (documentNumber) =>
+          prisma.salesReturn.create({
+            data: {
+              documentNumber,
+              returnDate: input.returnDate ?? new Date(),
+              reason: input.reason,
+              notes: input.notes,
+              customerId: input.customerId,
+              saleInvoiceId: input.saleInvoiceId,
+              warehouseId: input.warehouseId,
+              businessId: input.businessId,
+              items: { create: itemsData },
+              ...documentTaxColumns(tax),
             },
-          },
-          customer: { select: { id: true, name: true } },
-          warehouse: { select: { id: true, name: true } },
-        },
-      });
+            include: {
+              items: {
+                include: {
+                  product: { select: { id: true, name: true, sku: true } },
+                },
+              },
+              customer: { select: { id: true, name: true } },
+              warehouse: { select: { id: true, name: true } },
+            },
+          }),
+      );
 
       return sr;
     } catch (error: unknown) {
@@ -589,6 +651,11 @@ export const confirmSalesReturn = businessMemberProcedure
       }
 
       const confirmed = await prisma.$transaction(async (tx) => {
+        await lockProductsForUpdate(
+          tx,
+          sr.items.map((item) => item.productId),
+        );
+
         // Freeze the credit note at confirmation, mirroring the invoice path:
         // this is the figure that reduces outward liability in GSTR-3B.
         const { tax, appliedRates } = await computeReturnTax(tx, {
@@ -599,7 +666,21 @@ export const confirmSalesReturn = businessMemberProcedure
         });
         const lineTax = lineTaxColumns(tax);
 
+        // What each product cost when it left, taken from the invoice being
+        // credited. Returned goods must re-enter stock at the cost they were
+        // issued at — valuing them at `Product.costPrice` (a static field no
+        // receipt updates) let a return change the value of inventory it was
+        // only supposed to restore.
+        const issuedCosts = await originalSaleCosts(tx, sr.saleInvoiceId);
+
+        let costOfGoods = new Prisma.Decimal(0);
+
         for (const [index, item] of sr.items.entries()) {
+          const unitCost =
+            issuedCosts.get(item.productId) ??
+            new Prisma.Decimal(item.product.costPrice?.toString() ?? '0');
+          costOfGoods = costOfGoods.plus(unitCost.mul(item.quantity));
+
           // SALES_RETURN_IN increases stock
           await createLedgerEntry(tx, {
             transactionType: 'SALES_RETURN_IN',
@@ -609,7 +690,7 @@ export const confirmSalesReturn = businessMemberProcedure
             batchId: item.batchId,
             businessId: input.businessId,
             quantity: item.quantity,
-            unitCost: item.product.costPrice, // Use product's cost price for valuation
+            unitCost,
             referenceTable: 'sales_returns',
             referenceId: sr.id,
             transactionDate: sr.returnDate,
@@ -639,6 +720,7 @@ export const confirmSalesReturn = businessMemberProcedure
               cess: tax.totalCess.toFixed(2),
             },
             grandTotal: tax.grandTotal.toFixed(2),
+            costOfGoods: costOfGoods.toFixed(2),
           }),
         });
 

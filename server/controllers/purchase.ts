@@ -8,10 +8,7 @@ import {
   grnSchema,
 } from '@seed/schemas';
 import { handleControllerError } from '../helpers/controllerErrorHandler';
-import {
-  generateDocumentNumber,
-  DOC_PREFIXES,
-} from '../helpers/documentNumber';
+import { withDocumentNumber, DOC_PREFIXES } from '../helpers/documentNumber';
 import { createLedgerEntry } from '../helpers/inventoryLedger';
 import {
   computePurchaseTax,
@@ -32,12 +29,6 @@ export const createPurchaseOrder = businessMemberProcedure
   .input(purchaseOrderSchema)
   .mutation(async ({ input, ctx }) => {
     try {
-      const documentNumber = await generateDocumentNumber(
-        input.businessId,
-        DOC_PREFIXES.PURCHASE_ORDER,
-        input.documentNumber,
-      );
-
       const tax = await computePurchaseTax(prisma, input.businessId, {
         supplierId: input.supplierId,
         items: input.items,
@@ -54,28 +45,34 @@ export const createPurchaseOrder = businessMemberProcedure
         ...lineTax[index],
       }));
 
-      const po = await prisma.purchaseOrder.create({
-        data: {
-          documentNumber,
-          orderDate: input.orderDate ?? new Date(),
-          expectedDate: input.expectedDate,
-          notes: input.notes,
-          supplierId: input.supplierId,
-          businessId: input.businessId,
-          items: {
-            create: itemsData,
-          },
-          ...documentTaxColumns(tax),
-        },
-        include: {
-          items: {
-            include: {
-              product: { select: { id: true, name: true, sku: true } },
+      const po = await withDocumentNumber(
+        input.businessId,
+        DOC_PREFIXES.PURCHASE_ORDER,
+        input.documentNumber,
+        (documentNumber) =>
+          prisma.purchaseOrder.create({
+            data: {
+              documentNumber,
+              orderDate: input.orderDate ?? new Date(),
+              expectedDate: input.expectedDate,
+              notes: input.notes,
+              supplierId: input.supplierId,
+              businessId: input.businessId,
+              items: {
+                create: itemsData,
+              },
+              ...documentTaxColumns(tax),
             },
-          },
-          supplier: { select: { id: true, name: true } },
-        },
-      });
+            include: {
+              items: {
+                include: {
+                  product: { select: { id: true, name: true, sku: true } },
+                },
+              },
+              supplier: { select: { id: true, name: true } },
+            },
+          }),
+      );
 
       return po;
     } catch (error: unknown) {
@@ -471,7 +468,15 @@ export const deletePurchaseOrder = businessMemberProcedure
         });
       }
 
-      await prisma.purchaseOrder.delete({ where: { id: input.id } });
+      const removed = await prisma.purchaseOrder.deleteMany({
+        where: { id: input.id, businessId: input.businessId },
+      });
+      if (removed.count === 0) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Purchase order not found',
+        });
+      }
       return { success: true };
     } catch (error: unknown) {
       handleControllerError(error, {
@@ -492,12 +497,6 @@ export const createGRN = businessMemberProcedure
   .input(grnSchema)
   .mutation(async ({ input, ctx }) => {
     try {
-      const documentNumber = await generateDocumentNumber(
-        input.businessId,
-        DOC_PREFIXES.GRN,
-        input.documentNumber,
-      );
-
       const itemsData = input.items.map((item) => ({
         productId: item.productId,
         quantityOrdered: item.quantityOrdered,
@@ -508,29 +507,35 @@ export const createGRN = businessMemberProcedure
         batchId: item.batchId,
       }));
 
-      const grn = await prisma.goodsReceiptNote.create({
-        data: {
-          documentNumber,
-          receivedDate: input.receivedDate ?? new Date(),
-          notes: input.notes,
-          purchaseOrderId: input.purchaseOrderId,
-          supplierId: input.supplierId,
-          warehouseId: input.warehouseId,
-          businessId: input.businessId,
-          items: { create: itemsData },
-        },
-        include: {
-          items: {
-            include: {
-              product: { select: { id: true, name: true, sku: true } },
-              shelf: { select: { id: true, shelfCode: true } },
-              batch: { select: { id: true, batchNumber: true } },
+      const grn = await withDocumentNumber(
+        input.businessId,
+        DOC_PREFIXES.GRN,
+        input.documentNumber,
+        (documentNumber) =>
+          prisma.goodsReceiptNote.create({
+            data: {
+              documentNumber,
+              receivedDate: input.receivedDate ?? new Date(),
+              notes: input.notes,
+              purchaseOrderId: input.purchaseOrderId,
+              supplierId: input.supplierId,
+              warehouseId: input.warehouseId,
+              businessId: input.businessId,
+              items: { create: itemsData },
             },
-          },
-          supplier: { select: { id: true, name: true } },
-          warehouse: { select: { id: true, name: true } },
-        },
-      });
+            include: {
+              items: {
+                include: {
+                  product: { select: { id: true, name: true, sku: true } },
+                  shelf: { select: { id: true, shelfCode: true } },
+                  batch: { select: { id: true, batchNumber: true } },
+                },
+              },
+              supplier: { select: { id: true, name: true } },
+              warehouse: { select: { id: true, name: true } },
+            },
+          }),
+      );
 
       return grn;
     } catch (error: unknown) {
@@ -759,7 +764,8 @@ export const confirmGRN = businessMemberProcedure
         // tax breakup lives; GRN lines carry none.
         const inventoryValue = grn.items
           .reduce(
-            (sum, item) => sum.plus(new Prisma.Decimal(item.totalPrice.toString())),
+            (sum, item) =>
+              sum.plus(new Prisma.Decimal(item.totalPrice.toString())),
             new Prisma.Decimal(0),
           )
           .toFixed(2);
@@ -863,7 +869,12 @@ export const deleteGRN = businessMemberProcedure
         });
       }
 
-      await prisma.goodsReceiptNote.delete({ where: { id: input.id } });
+      const removed = await prisma.goodsReceiptNote.deleteMany({
+        where: { id: input.id, businessId: input.businessId },
+      });
+      if (removed.count === 0) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'GRN not found' });
+      }
       return { success: true };
     } catch (error: unknown) {
       handleControllerError(error, {

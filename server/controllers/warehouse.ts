@@ -171,7 +171,15 @@ export const deleteWarehouse = businessMemberProcedure
         });
       }
 
-      await prisma.warehouse.delete({ where: { id: input.id } });
+      const removed = await prisma.warehouse.deleteMany({
+        where: { id: input.id, businessId: input.businessId },
+      });
+      if (removed.count === 0) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Warehouse not found',
+        });
+      }
       return { success: true };
     } catch (error: unknown) {
       handleControllerError(error, {
@@ -322,7 +330,12 @@ export const deleteShelf = businessMemberProcedure
         });
       }
 
-      await prisma.shelf.delete({ where: { id: input.id } });
+      const removed = await prisma.shelf.deleteMany({
+        where: { id: input.id, warehouse: { businessId: input.businessId } },
+      });
+      if (removed.count === 0) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Shelf not found' });
+      }
       return { success: true };
     } catch (error: unknown) {
       handleControllerError(error, {

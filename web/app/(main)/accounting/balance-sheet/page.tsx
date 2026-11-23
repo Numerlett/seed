@@ -60,11 +60,15 @@ export default function BalanceSheetPage() {
           <Section title="Assets" rows={data.assets} total={data.totalAssets} />
           <Section title="Liabilities" rows={data.liabilities} total={data.totalLiabilities} />
           <Section title="Equity" rows={data.equity} total={data.totalEquity} />
-          <Card className={Math.abs(data.totalAssets - data.totalLiabilities - data.totalEquity) < 0.01 ? 'border-green-500' : 'border-red-500'}>
-            <CardContent className="pt-4 text-sm text-muted-foreground">
-              {Math.abs(data.totalAssets - data.totalLiabilities - data.totalEquity) < 0.01
+          {/* The server decides whether the books balance and returns the
+              residual. The check used to be recomputed here from totals with
+              mismatched signs, so it reported an imbalance for every business
+              that had ever traded. */}
+          <Card className={data.balanced ? 'border-green-500' : 'border-red-500'}>
+            <CardContent className="text-muted-foreground pt-4 text-sm">
+              {data.balanced
                 ? 'Balance sheet is balanced.'
-                : 'Warning: Balance sheet does not balance.'}
+                : `Warning: balance sheet is out by ${fmt(Math.abs(data.difference))}.`}
             </CardContent>
           </Card>
         </div>

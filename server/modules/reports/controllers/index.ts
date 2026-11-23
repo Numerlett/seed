@@ -1,4 +1,6 @@
 import { prisma } from '@seed/database';
+import { money, toMoneyNumber } from '@seed/accounting';
+import { inclusiveRange } from '../../../helpers/dateRange';
 import { logger } from '../../../helpers/logger';
 
 /**
@@ -50,7 +52,7 @@ export async function getSalesRegister(
   const skip = (input.page - 1) * input.limit;
   const where = {
     businessId,
-    invoiceDate: { gte: input.dateFrom, lte: input.dateTo },
+    invoiceDate: inclusiveRange(input.dateFrom, input.dateTo),
     status: 'CONFIRMED' as const,
   };
 
@@ -76,20 +78,20 @@ export async function getSalesRegister(
       invoiceDate: inv.invoiceDate,
       customerName: inv.customer?.name,
       customerGstin: inv.customer?.gstin,
-      taxableAmount: Number(inv.taxableAmount ?? 0),
-      cgst: Number(inv.cgstAmount ?? 0),
-      sgst: Number(inv.sgstAmount ?? 0),
-      igst: Number(inv.igstAmount ?? 0),
-      grandTotal: Number(inv.grandTotal),
+      taxableAmount: toMoneyNumber(inv.taxableAmount),
+      cgst: toMoneyNumber(inv.cgstAmount),
+      sgst: toMoneyNumber(inv.sgstAmount),
+      igst: toMoneyNumber(inv.igstAmount),
+      grandTotal: toMoneyNumber(inv.grandTotal),
     })),
     total,
     page: input.page,
     summary: {
-      grandTotal: Number(agg?._sum?.grandTotal ?? 0),
-      taxableAmount: Number(agg?._sum?.taxableAmount ?? 0),
-      cgst: Number(agg?._sum?.cgstAmount ?? 0),
-      sgst: Number(agg?._sum?.sgstAmount ?? 0),
-      igst: Number(agg?._sum?.igstAmount ?? 0),
+      grandTotal: toMoneyNumber(agg?._sum?.grandTotal),
+      taxableAmount: toMoneyNumber(agg?._sum?.taxableAmount),
+      cgst: toMoneyNumber(agg?._sum?.cgstAmount),
+      sgst: toMoneyNumber(agg?._sum?.sgstAmount),
+      igst: toMoneyNumber(agg?._sum?.igstAmount),
     },
   };
 }
@@ -101,7 +103,7 @@ export async function getPurchaseRegister(
   const skip = (input.page - 1) * input.limit;
   const where = {
     businessId,
-    orderDate: { gte: input.dateFrom, lte: input.dateTo },
+    orderDate: inclusiveRange(input.dateFrom, input.dateTo),
     status: 'CONFIRMED' as const,
   };
 
@@ -127,17 +129,17 @@ export async function getPurchaseRegister(
       orderDate: po.orderDate,
       supplierName: po.supplier?.name,
       supplierGstin: po.supplier?.gstin,
-      taxableAmount: Number(po.taxableAmount ?? 0),
-      cgst: Number(po.cgstAmount ?? 0),
-      sgst: Number(po.sgstAmount ?? 0),
-      igst: Number(po.igstAmount ?? 0),
-      grandTotal: Number(po.grandTotal),
+      taxableAmount: toMoneyNumber(po.taxableAmount),
+      cgst: toMoneyNumber(po.cgstAmount),
+      sgst: toMoneyNumber(po.sgstAmount),
+      igst: toMoneyNumber(po.igstAmount),
+      grandTotal: toMoneyNumber(po.grandTotal),
     })),
     total,
     page: input.page,
     summary: {
-      grandTotal: Number(agg?._sum?.grandTotal ?? 0),
-      taxableAmount: Number(agg?._sum?.taxableAmount ?? 0),
+      grandTotal: toMoneyNumber(agg?._sum?.grandTotal),
+      taxableAmount: toMoneyNumber(agg?._sum?.taxableAmount),
     },
   };
 }
@@ -155,19 +157,19 @@ export async function getPartyStatement(
 
   const [sales, purchases, payments] = await Promise.all([
     prisma.saleInvoice.findMany({
-      where: { businessId, customerId: partyId, invoiceDate: { gte: input.dateFrom, lte: input.dateTo }, status: 'CONFIRMED' },
+      where: { businessId, customerId: partyId, invoiceDate: inclusiveRange(input.dateFrom, input.dateTo), status: 'CONFIRMED' },
       orderBy: { invoiceDate: 'asc' },
       select: { id: true, documentNumber: true, invoiceDate: true, grandTotal: true },
       take,
     }),
     prisma.purchaseOrder.findMany({
-      where: { businessId, supplierId: partyId, orderDate: { gte: input.dateFrom, lte: input.dateTo }, status: 'CONFIRMED' },
+      where: { businessId, supplierId: partyId, orderDate: inclusiveRange(input.dateFrom, input.dateTo), status: 'CONFIRMED' },
       orderBy: { orderDate: 'asc' },
       select: { id: true, documentNumber: true, orderDate: true, grandTotal: true },
       take,
     }),
     prisma.payment.findMany({
-      where: { businessId, partyId, date: { gte: input.dateFrom, lte: input.dateTo } },
+      where: { businessId, partyId, date: inclusiveRange(input.dateFrom, input.dateTo) },
       orderBy: { date: 'asc' },
       select: { id: true, documentNumber: true, date: true, amount: true, type: true },
       take,
@@ -179,21 +181,32 @@ export async function getPartyStatement(
     purchases.length > MAX_STATEMENT_ROWS_PER_SOURCE ||
     payments.length > MAX_STATEMENT_ROWS_PER_SOURCE;
 
+  // Amounts stay Decimal through the sort and the running total. Accumulating
+  // `Number` deltas over a few thousand statement rows drifts far enough to
+  // show a closing balance that disagrees with the invoices it is made of.
+  const zero = money(0);
   const ledger = [
-    ...sales.map((s) => ({ date: s.invoiceDate, docNo: s.documentNumber, description: 'Sale Invoice', debit: Number(s.grandTotal), credit: 0 })),
-    ...purchases.map((p) => ({ date: p.orderDate, docNo: p.documentNumber, description: 'Purchase', debit: 0, credit: Number(p.grandTotal) })),
-    ...payments.map((p) => ({ date: p.date, docNo: p.documentNumber, description: `Payment ${p.type}`, debit: p.type === 'MADE' ? 0 : Number(p.amount), credit: p.type === 'RECEIVED' ? 0 : Number(p.amount) })),
+    ...sales.map((s) => ({ date: s.invoiceDate, docNo: s.documentNumber, description: 'Sale Invoice', debit: money(s.grandTotal), credit: zero })),
+    ...purchases.map((p) => ({ date: p.orderDate, docNo: p.documentNumber, description: 'Purchase', debit: zero, credit: money(p.grandTotal) })),
+    ...payments.map((p) => ({ date: p.date, docNo: p.documentNumber, description: `Payment ${p.type}`, debit: p.type === 'MADE' ? zero : money(p.amount), credit: p.type === 'RECEIVED' ? zero : money(p.amount) })),
   ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  let runningBalance = 0;
+  let runningBalance = zero;
   const rows = ledger.map((row) => {
-    runningBalance += row.debit - row.credit;
-    return { ...row, balance: runningBalance };
+    runningBalance = runningBalance.plus(row.debit).minus(row.credit);
+    return {
+      date: row.date,
+      docNo: row.docNo,
+      description: row.description,
+      debit: toMoneyNumber(row.debit),
+      credit: toMoneyNumber(row.credit),
+      balance: toMoneyNumber(runningBalance),
+    };
   });
 
   return {
     rows,
-    closingBalance: runningBalance,
+    closingBalance: toMoneyNumber(runningBalance),
     truncated,
     ...(truncated && {
       truncationNotice: `Showing the first ${MAX_STATEMENT_ROWS_PER_SOURCE} entries per document type. Narrow the date range for a complete statement.`,

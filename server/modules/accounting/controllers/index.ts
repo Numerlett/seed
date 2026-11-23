@@ -1,7 +1,14 @@
-import { prisma, AccountSubType } from '@seed/database';
+import { prisma, AccountSubType, AccountType } from '@seed/database';
 import { TRPCError } from '@trpc/server';
-import { assertPostable } from '@seed/accounting';
+import {
+  assertPostable,
+  Decimal,
+  money,
+  sumBy,
+  toMoneyNumber,
+} from '@seed/accounting';
 import { DEFAULT_COA } from '../../../lib/accounting/chartOfAccounts';
+import { endOfDay } from '../../../helpers/dateRange';
 
 
 export async function getChartOfAccounts(businessId: string) {
@@ -122,29 +129,56 @@ export async function createManualJournalEntry(
   });
 }
 
-export async function getTrialBalance(businessId: string, asOf?: Date) {
-  const dateFilter = asOf ? { date: { lte: asOf } } : {};
+/** An account's aggregated movement, kept in Decimal until the API boundary. */
+type AccountBalance = {
+  account: { code: string; name: string; type: string };
+  debit: Decimal;
+  credit: Decimal;
+};
 
-  // Aggregated in the database rather than by loading every journal line into
-  // memory: a business with a few years of history would otherwise exhaust the
-  // machine long before the report rendered.
+/**
+ * Aggregates journal movement per account for a period.
+ *
+ * The shared source for the trial balance, P&L and balance sheet, so the three
+ * reports can never disagree about what an account holds. Summed in the
+ * database rather than by streaming every line through Node — a business with
+ * a few years of history would exhaust the machine before the report rendered.
+ */
+async function accountBalances(
+  businessId: string,
+  range: { from?: Date; asOf?: Date; types?: AccountType[] } = {},
+): Promise<AccountBalance[]> {
+  const dateFilter =
+    range.from || range.asOf
+      ? {
+          date: {
+            ...(range.from ? { gte: range.from } : {}),
+            ...(range.asOf ? { lte: endOfDay(range.asOf) } : {}),
+          },
+        }
+      : {};
+
   const grouped = await prisma.journalLine.groupBy({
     by: ['accountId'],
-    where: { entry: { businessId, ...dateFilter } },
+    where: {
+      entry: { businessId, ...dateFilter },
+      ...(range.types ? { account: { type: { in: range.types } } } : {}),
+    },
     _sum: { debit: true, credit: true },
   });
 
-  if (grouped.length === 0) {
-    return { rows: [], totals: { debit: 0, credit: 0 } };
-  }
+  if (grouped.length === 0) return [];
 
+  // Scoped by business as well as id. The ids come from lines already filtered
+  // to this business, so this is belt-and-braces — but it is the kind of query
+  // that silently becomes a cross-tenant read after an innocent refactor.
   const accounts = await prisma.chartOfAccount.findMany({
-    where: { id: { in: grouped.map((g) => g.accountId) } },
+    where: { businessId, id: { in: grouped.map((g) => g.accountId) } },
     select: { id: true, code: true, name: true, type: true },
   });
   const accountById = new Map(accounts.map((a) => [a.id, a]));
 
-  const rows = grouped
+  return grouped
     .map((group) => {
       const account = accountById.get(group.accountId);
       return {
@@ -153,84 +187,168 @@ export async function getTrialBalance(businessId: string, asOf?: Date) {
           name: account?.name ?? 'Unknown account',
           type: account?.type ?? '',
         },
-        debit: Number(group._sum.debit ?? 0),
-        credit: Number(group._sum.credit ?? 0),
+        debit: money(group._sum.debit),
+        credit: money(group._sum.credit),
       };
     })
     .sort((a, b) => a.account.code.localeCompare(b.account.code));
+}
 
-  const totals = rows.reduce(
-    (s, r) => ({ debit: s.debit + r.debit, credit: s.credit + r.credit }),
-    { debit: 0, credit: 0 },
+/** Natural balance of an account, debit-positive. */
+function netDebit(row: AccountBalance): Decimal {
+  return row.debit.minus(row.credit);
+}
+
+export async function getTrialBalance(businessId: string, asOf?: Date) {
+  const balances = await accountBalances(businessId, { asOf });
+
+  const rows = balances.map((row) => ({
+    account: row.account,
+    debit: toMoneyNumber(row.debit),
+    credit: toMoneyNumber(row.credit),
+  }));
+
+  // Summed as Decimal, converted once. Adding the already-converted numbers
+  // would reintroduce the float drift this aggregation exists to avoid.
+  return {
+    rows,
+    totals: {
+      debit: toMoneyNumber(sumBy(balances, (row) => row.debit)),
+      credit: toMoneyNumber(sumBy(balances, (row) => row.credit)),
+    },
+  };
+}
+
+/**
+ * Net profit for a period, in Decimal. Income carries a credit balance and
+ * expense a debit balance, so profit is credit − debit across both.
+ *
+ * Shared by the P&L and the balance sheet so the profit shown on one is by
+ * construction the retained earnings figure on the other.
+ */
+async function netProfitFor(
+  businessId: string,
+  range: { from?: Date; asOf?: Date },
+): Promise<Decimal> {
+  const balances = await accountBalances(businessId, {
+    ...range,
+    types: ['INCOME', 'EXPENSE'],
+  });
+  return balances.reduce<Decimal>(
+    (total, row) => total.minus(netDebit(row)),
+    new Decimal(0),
   );
-
-  return { rows, totals };
 }
 
 export async function getProfitAndLoss(businessId: string, dateFrom: Date, dateTo: Date) {
-  // Aggregated per account in the database rather than by streaming every
-  // journal line through Node.
-  const grouped = await prisma.journalLine.groupBy({
-    by: ['accountId'],
-    where: {
-      entry: { businessId, date: { gte: dateFrom, lte: dateTo } },
-      account: { type: { in: ['INCOME', 'EXPENSE'] } },
-    },
-    _sum: { debit: true, credit: true },
+  const balances = await accountBalances(businessId, {
+    from: dateFrom,
+    asOf: dateTo,
+    types: ['INCOME', 'EXPENSE'],
   });
 
   const incomeLines: { name: string; amount: number }[] = [];
   const expenseLines: { name: string; amount: number }[] = [];
-  let revenue = 0;
-  let expenses = 0;
+  let revenue = new Decimal(0);
+  let expenses = new Decimal(0);
 
-  if (grouped.length > 0) {
-    const accounts = await prisma.chartOfAccount.findMany({
-      where: { id: { in: grouped.map((g) => g.accountId) } },
-      select: { id: true, name: true, type: true },
-    });
-    const accountById = new Map(accounts.map((a) => [a.id, a]));
+  for (const row of balances) {
+    // Credit-positive: income earned, expense incurred as a negative.
+    const net = netDebit(row).negated();
 
-    for (const group of grouped) {
-      const account = accountById.get(group.accountId);
-      if (!account) continue;
-
-      // Income accounts carry a credit balance, expenses a debit balance.
-      const net =
-        Number(group._sum.credit ?? 0) - Number(group._sum.debit ?? 0);
-
-      if (account.type === 'INCOME') {
-        revenue += net;
-        incomeLines.push({ name: account.name, amount: net });
-      } else {
-        expenses += -net;
-        expenseLines.push({ name: account.name, amount: -net });
-      }
+    if (row.account.type === 'INCOME') {
+      revenue = revenue.plus(net);
+      incomeLines.push({ name: row.account.name, amount: toMoneyNumber(net) });
+    } else {
+      expenses = expenses.plus(net.negated());
+      expenseLines.push({
+        name: row.account.name,
+        amount: toMoneyNumber(net.negated()),
+      });
     }
   }
 
   return {
-    revenue,
-    expenses,
-    netProfit: revenue - expenses,
+    revenue: toMoneyNumber(revenue),
+    expenses: toMoneyNumber(expenses),
+    netProfit: toMoneyNumber(revenue.minus(expenses)),
     incomeLines,
     expenseLines,
   };
 }
 
+/**
+ * Balance sheet as at a date.
+ *
+ * Income and expense used to be dropped entirely, so the statement was out by
+ * exactly the period's net profit — always, for every business. There are no
+ * closing entries in this system, so current-period earnings are computed from
+ * the income and expense accounts and presented as a line within equity. That
+ * is what makes assets equal liabilities plus equity.
+ *
+ * Totals are returned as positive magnitudes in each section's natural
+ * direction: assets debit-positive, liabilities and equity credit-positive.
+ * `difference` is the residual and is exactly zero for a correct ledger —
+ * it is returned rather than hidden so a broken invariant is visible in the UI
+ * instead of being silently rendered.
+ */
 export async function getBalanceSheet(businessId: string, asOf: Date) {
-  const { rows } = await getTrialBalance(businessId, asOf);
+  const balances = await accountBalances(businessId, { asOf });
 
-  const assets = rows.filter((r) => r.account.type === 'ASSET');
-  const liabilities = rows.filter((r) => r.account.type === 'LIABILITY');
-  const equity = rows.filter((r) => r.account.type === 'EQUITY');
+  const section = (type: string) =>
+    balances.filter((row) => row.account.type === type);
 
-  const sum = (rows: typeof assets) => rows.reduce((s, r) => s + r.debit - r.credit, 0);
-  const totalAssets = sum(assets);
-  const totalLiabilities = sum(liabilities);
-  const totalEquity = sum(equity);
+  const assetRows = section('ASSET');
+  const liabilityRows = section('LIABILITY');
+  const equityRows = section('EQUITY');
 
-  return { assets, liabilities, equity, totalAssets, totalLiabilities, totalEquity };
+  const retainedEarnings = await netProfitFor(businessId, { asOf });
+
+  const totalAssets = assetRows.reduce<Decimal>(
+    (total, row) => total.plus(netDebit(row)),
+    new Decimal(0),
+  );
+  // Credit-positive, so a liability of 100 reads as 100 rather than -100.
+  const totalLiabilities = liabilityRows.reduce<Decimal>(
+    (total, row) => total.minus(netDebit(row)),
+    new Decimal(0),
+  );
+  const totalEquity = equityRows
+    .reduce<Decimal>((total, row) => total.minus(netDebit(row)), new Decimal(0))
+    .plus(retainedEarnings);
+
+  const difference = totalAssets.minus(totalLiabilities).minus(totalEquity);
+
+  const toRow = (row: AccountBalance) => ({
+    account: row.account,
+    debit: toMoneyNumber(row.debit),
+    credit: toMoneyNumber(row.credit),
+  });
+
+  return {
+    assets: assetRows.map(toRow),
+    liabilities: liabilityRows.map(toRow),
+    equity: [
+      ...equityRows.map(toRow),
+      // Computed, not posted. Labelled so nobody mistakes it for a real
+      // account that a closing entry has already written.
+      {
+        account: {
+          code: '3900',
+          name: 'Current Period Earnings (computed)',
+          type: 'EQUITY',
+        },
+        debit: toMoneyNumber(retainedEarnings.isNegative() ? retainedEarnings.negated() : 0),
+        credit: toMoneyNumber(retainedEarnings.isNegative() ? 0 : retainedEarnings),
+      },
+    ],
+    totalAssets: toMoneyNumber(totalAssets),
+    totalLiabilities: toMoneyNumber(totalLiabilities),
+    totalEquity: toMoneyNumber(totalEquity),
+    retainedEarnings: toMoneyNumber(retainedEarnings),
+    difference: toMoneyNumber(difference),
+    balanced: difference.isZero(),
+  };
 }
 
 export async function getFiscalYears(businessId: string) {

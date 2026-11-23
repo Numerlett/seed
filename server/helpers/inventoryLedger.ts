@@ -177,7 +177,11 @@ async function upsertStockSummary(
         currentValue: { increment: delta.valueDelta },
       },
     });
-  } else {
+    await reconcileEmptyStock(tx, existing.id);
+    return;
+  }
+
+  try {
     await tx.inventoryStock.create({
       data: {
         productId: delta.productId,
@@ -188,6 +192,37 @@ async function upsertStockSummary(
         currentValue: delta.valueDelta,
       },
     });
+  } catch (error) {
+    // Two first-ever movements at the same location race here: both find
+    // nothing and both insert, and the compound unique rejects the second.
+    // The row now exists, so apply the delta to it rather than losing the
+    // movement. Any other failure is not ours to swallow.
+    if (
+      !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+      error.code !== 'P2002'
+    ) {
+      throw error;
+    }
+
+    const created = await tx.inventoryStock.findFirst({
+      where: {
+        productId: delta.productId,
+        warehouseId: delta.warehouseId,
+        shelfId: delta.shelfId,
+        batchId: delta.batchId,
+      },
+      select: { id: true },
+    });
+    if (!created) throw error;
+
+    await tx.inventoryStock.update({
+      where: { id: created.id },
+      data: {
+        currentQuantity: { increment: delta.quantityDelta },
+        currentValue: { increment: delta.valueDelta },
+      },
+    });
+    await reconcileEmptyStock(tx, created.id);
   }
 }
 
@@ -214,6 +249,115 @@ async function updateProductStockCache(
     where: { id: productId },
     data: { currentStockLevel: totalQuantity },
   });
+}
+
+// ---------- Concurrency ----------
+
+/**
+ * Serialises stock movements for a set of products.
+ *
+ * Every outbound path reads stock (to check availability and to work out the
+ * weighted-average cost) and then writes it. At the default READ COMMITTED
+ * isolation two concurrent confirmations both read the same "before" state,
+ * both decide there is enough, and both deduct — overselling the stock and
+ * computing the average from a position that no longer exists.
+ *
+ * Locking the product rows rather than the stock rows is deliberate: a stock
+ * row may not exist yet for the location being issued from, and a lock on a
+ * row that is absent locks nothing. The product row always exists, and it
+ * covers every location that product is held at.
+ *
+ * Ids are locked in a stable order so two transactions touching the same
+ * products in different orders cannot deadlock against each other.
+ *
+ * Must be called inside a transaction; the lock is released when it ends.
+ */
+export async function lockProductsForUpdate(
+  tx: PrismaTransaction,
+  productIds: string[],
+): Promise<void> {
+  const ids = [...new Set(productIds)].sort();
+  if (ids.length === 0) return;
+
+  await tx.$queryRaw`
+    SELECT id FROM "products"
+    WHERE id = ANY(${ids}::text[])
+    ORDER BY id
+    FOR UPDATE
+  `;
+}
+
+// ---------- Costing ----------
+
+/**
+ * The weighted-average unit cost of the stock currently held at a location.
+ *
+ * Stock used to go in at its real purchase price and come out at
+ * `Product.costPrice` — a field set once when the product was created and
+ * never updated by a receipt. Value in and value out therefore used different
+ * costs, so `InventoryStock.currentValue` drifted permanently away from
+ * reality, taking COGS, gross profit and the inventory figure on the balance
+ * sheet with it.
+ *
+ * The average is read inside the caller's transaction so it reflects every
+ * movement already applied there.
+ *
+ * Falls back to `Product.costPrice` only when there is nothing on hand to
+ * average — the first-ever movement, or an issue from negative stock for a
+ * product that permits it.
+ */
+export async function resolveOutboundCost(
+  tx: PrismaTransaction,
+  params: {
+    productId: string;
+    warehouseId: string;
+    shelfId?: string | null;
+    batchId?: string | null;
+  },
+): Promise<Decimal> {
+  const stock = await tx.inventoryStock.findFirst({
+    where: {
+      productId: params.productId,
+      warehouseId: params.warehouseId,
+      shelfId: params.shelfId ?? null,
+      batchId: params.batchId ?? null,
+    },
+    select: { currentQuantity: true, currentValue: true },
+  });
+
+  if (stock && stock.currentQuantity.greaterThan(0)) {
+    return stock.currentValue.div(stock.currentQuantity);
+  }
+
+  const product = await tx.product.findUnique({
+    where: { id: params.productId },
+    select: { costPrice: true },
+  });
+  return new Decimal(product?.costPrice?.toString() ?? '0');
+}
+
+/**
+ * Corrects value drift once a location is empty.
+ *
+ * Quantity and value are maintained by separate increments, and rounding on
+ * the average means a location can reach zero quantity holding a residual
+ * fraction of a rupee. Left alone that residue accumulates on the balance
+ * sheet as inventory that does not exist. Nothing on hand means nothing to
+ * value.
+ */
+async function reconcileEmptyStock(tx: PrismaTransaction, stockId: string) {
+  const stock = await tx.inventoryStock.findUnique({
+    where: { id: stockId },
+    select: { currentQuantity: true, currentValue: true },
+  });
+  if (!stock) return;
+
+  if (stock.currentQuantity.lessThanOrEqualTo(0) && !stock.currentValue.isZero()) {
+    await tx.inventoryStock.update({
+      where: { id: stockId },
+      data: { currentValue: new Decimal(0) },
+    });
+  }
 }
 
 // ---------- Stock Validation Helpers ----------
