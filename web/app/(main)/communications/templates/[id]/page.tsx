@@ -3,7 +3,7 @@ import { useParams, useRouter } from 'next/navigation';
 import PageTitle from '@/components/main/PageTitle';
 import { useBusiness } from '@/providers/BusinessProvider';
 import { clientTrpc } from '@seed/api/client';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
@@ -70,7 +70,11 @@ export default function EditTemplatePage() {
     }
   }, [template, form]);
 
-  const body = form.watch('body') ?? '';
+  // useWatch rather than form.watch: watch() returns a function the React
+  // Compiler cannot memoize, so it skips this component entirely.
+  const body = useWatch({ control: form.control, name: 'body' }) ?? '';
+  const isActive = useWatch({ control: form.control, name: 'isActive' });
+  const isDefault = useWatch({ control: form.control, name: 'isDefault' });
   const detectedVars = useMemo(() => extractVariables(body), [body]);
 
   const { mutate, isPending } =
@@ -194,7 +198,7 @@ export default function EditTemplatePage() {
             <div className="flex items-center gap-2">
               <Checkbox
                 id="isActive"
-                checked={form.watch('isActive')}
+                checked={isActive}
                 disabled={isPlatformTemplate}
                 onCheckedChange={(v) => form.setValue('isActive', !!v)}
               />
@@ -206,7 +210,7 @@ export default function EditTemplatePage() {
             <div className="flex items-center gap-2">
               <Checkbox
                 id="isDefault"
-                checked={form.watch('isDefault')}
+                checked={isDefault}
                 disabled={isPlatformTemplate}
                 onCheckedChange={(v) => form.setValue('isDefault', !!v)}
               />

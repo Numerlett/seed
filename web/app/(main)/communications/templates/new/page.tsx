@@ -3,7 +3,7 @@ import { useRouter } from 'next/navigation';
 import PageTitle from '@/components/main/PageTitle';
 import { useBusiness } from '@/providers/BusinessProvider';
 import { clientTrpc } from '@seed/api/client';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
@@ -71,8 +71,10 @@ export default function NewTemplatePage() {
     defaultValues: { type: 'CUSTOM', channel: 'EMAIL' },
   });
 
-  const channel = form.watch('channel');
-  const body = form.watch('body') ?? '';
+  // useWatch rather than form.watch: watch() returns a function the React
+  // Compiler cannot memoize, so it skips this component entirely.
+  const channel = useWatch({ control: form.control, name: 'channel' });
+  const body = useWatch({ control: form.control, name: 'body' }) ?? '';
   const detectedVars = useMemo(() => extractVariables(body), [body]);
 
   const { mutate, isPending } = clientTrpc.communications.createTemplate.useMutation({
