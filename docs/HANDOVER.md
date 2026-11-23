@@ -10,18 +10,18 @@ also the most compact statement of the codebase's invariants, so read it too.
 
 | | |
 | --- | --- |
-| Branch | `fix/gst-breakup-and-platform-hardening`, branched from `main` at `4f69bbf`, not yet merged |
+| Code | All of it is on `main`, merged through [PR #1](https://github.com/Numerlett/seed/pull/1) (`fix/gst-breakup-and-platform-hardening`) |
 | Build | `pnpm build` passes |
 | Lint | `pnpm lint` passes: `tsc --noEmit` on every package, ESLint on web with no warnings |
 | Tests | 287 tests in 28 files pass, including the 9 integration suites, run against Postgres 17 |
 | Migrations | All 10 apply to an empty database, and the Prisma schema matches what they build (`db:drift`) |
-| CI | Applies migrations, checks drift, then builds, lints and tests. The first run with this work is the PR |
-| Production | The server runs `serverless` on Fly (see [DEPLOYMENT.md](DEPLOYMENT.md)). `main` has only the `init` migration |
+| CI | Applies migrations, checks drift, then builds, lints and tests; green on PR #1 |
+| Production | The server runs `serverless` on Fly (see [DEPLOYMENT.md](DEPLOYMENT.md)). This work has **not been deployed**: the next deploy applies nine migrations |
 
 **Not verified:** anything against a live provider (GSP/IRP, Razorpay, email, SMS, WhatsApp), the Playwright specs,
 the mobile app on a device, and production data.
 
-### What this branch contains
+### What PR #1 contains
 
 - GST breakup computed by `@seed/tax`, persisted on every sales and purchase document and frozen at confirmation;
   returns are filed as credit and debit notes; money is `Decimal` end to end.
@@ -132,7 +132,8 @@ Integration suites live in [server/tests/integration/](../server/tests/integrati
 | `20260905090000_payment_allocation_foreign_keys` | Real foreign keys; detaches allocations pointing at deleted documents |
 
 Fly runs `db:deploy` as its `release_command`, so the next deploy applies every pending migration. Follow
-[DEPLOYMENT.md → Before the next deploy](DEPLOYMENT.md#before-the-next-deploy-the-2026-hardening-migrations) first:
+[DEPLOYMENT.md → Before the next deploy](DEPLOYMENT.md#before-the-next-deploy-the-2026-hardening-migrations) first
+(`main` held only `init` until this work landed, so check what production actually has):
 check `prisma migrate status`, back up, count the allocations the last migration will detach.
 
 Rules: commit a model change and its migration together; never edit a migration that has been applied anywhere;
@@ -212,7 +213,7 @@ ORDER BY ABS(COALESCE(g.balance, 0) - COALESCE(s.value, 0)) DESC;
 
 In suggested order.
 
-1. **Land this branch.** Open the PR into `main`, let CI run, merge, then deploy following DEPLOYMENT.md.
+1. **Deploy what is on `main`.** It is merged but not deployed. Follow DEPLOYMENT.md's "Before the next deploy" first.
 2. **Reconcile production books** with the query above, if the database holds real data.
 3. **Purchase discounts** (gap 2): default GRN prices from the order's net price, then add discounted cases to
    `inventoryReconciliation`.
