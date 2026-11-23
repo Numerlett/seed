@@ -59,15 +59,26 @@ type TaxAmounts = {
 };
 
 /**
- * Sale invoice confirmed → Debtors Dr, Sales Cr, Output GST Cr
+ * Sale invoice confirmed → Debtors Dr, Sales Cr, Output GST Cr,
+ * and — when the sale moves goods — COGS Dr, Inventory Cr.
+ *
+ * The cost half used to be missing entirely. Inventory was debited by every
+ * receipt and never relieved by a sale, so the balance sheet reported stock
+ * that had already been shipped, `Cost of Goods Sold` stayed at zero and gross
+ * profit was the full sale value. `costOfGoods` is the weighted-average cost
+ * of the stock actually issued, so the margin recognised is the real one.
+ *
+ * Optional because a sale can legitimately move no goods — a service invoice
+ * has no inventory to relieve — and posting a zero pair would just be noise.
  */
 export function saleInvoicePosting(params: {
   partyId: string;
   taxableAmount: Numeric;
   tax: TaxAmounts;
   grandTotal: Numeric;
+  costOfGoods?: Numeric;
 }): PostingLine[] {
-  const { partyId, taxableAmount, tax, grandTotal } = params;
+  const { partyId, taxableAmount, tax, grandTotal, costOfGoods } = params;
   const lines: PostingLine[] = [
     { accountCode: ACCOUNTS.ACCOUNTS_RECEIVABLE, debit: grandTotal, credit: 0, partyId },
     { accountCode: ACCOUNTS.SALES, debit: 0, credit: taxableAmount },
@@ -76,17 +87,28 @@ export function saleInvoicePosting(params: {
   if (posts(tax.sgst)) lines.push({ accountCode: ACCOUNTS.GST_OUTPUT_SGST, debit: 0, credit: tax.sgst });
   if (posts(tax.igst)) lines.push({ accountCode: ACCOUNTS.GST_OUTPUT_IGST, debit: 0, credit: tax.igst });
   if (posts(tax.cess)) lines.push({ accountCode: ACCOUNTS.GST_OUTPUT_CESS, debit: 0, credit: tax.cess });
+
+  // Added as a balanced pair, so the entry stays balanced with or without it.
+  if (costOfGoods !== undefined && posts(costOfGoods)) {
+    lines.push({ accountCode: ACCOUNTS.COGS, debit: costOfGoods, credit: 0 });
+    lines.push({ accountCode: ACCOUNTS.INVENTORY, debit: 0, credit: costOfGoods });
+  }
+
   return lines;
 }
 
 /**
- * Sales return confirmed → reverse of sale invoice posting
+ * Sales return confirmed → reverse of sale invoice posting.
+ *
+ * Mirroring the sale means the cost side reverses too: goods coming back go
+ * into Inventory Dr and out of COGS Cr, at the cost they were issued at.
  */
 export function salesReturnPosting(params: {
   partyId: string;
   taxableAmount: Numeric;
   tax: TaxAmounts;
   grandTotal: Numeric;
+  costOfGoods?: Numeric;
 }): PostingLine[] {
   return saleInvoicePosting(params).map((l) => ({
     ...l,
@@ -158,6 +180,9 @@ export function supplierInvoicePosting(params: {
 /**
  * Purchase return confirmed → reverse of the supplier invoice posting.
  * Reduces both the payable and the input tax credit claimed.
+ *
+ * This is the supplier leg only. The goods physically leaving are booked by
+ * `purchaseReturnStockPosting`; a confirmed return posts both in one entry.
  */
 export function purchaseReturnPosting(params: {
   partyId: string;
@@ -170,6 +195,27 @@ export function purchaseReturnPosting(params: {
     debit: l.credit,
     credit: l.debit,
   }));
+}
+
+/**
+ * Goods leaving on a purchase return → GR/IR Clearing Dr, Inventory Cr.
+ *
+ * The mirror of the Inventory/GR-IR pair `grnPosting` books on receipt, and the
+ * other half of a purchase return alongside `purchaseReturnPosting`. Without it
+ * the stock leaves the warehouse while the Inventory account keeps carrying it,
+ * and the return's credit to GR/IR clearing has nothing to clear against.
+ *
+ * `inventoryValue` is the value the stock subledger gave up — quantity times
+ * the price on the return line — so the account and the subledger move together.
+ */
+export function purchaseReturnStockPosting(params: {
+  partyId: string;
+  inventoryValue: Numeric;
+}): PostingLine[] {
+  return [
+    { accountCode: ACCOUNTS.GR_IR_CLEARING, debit: params.inventoryValue, credit: 0, partyId: params.partyId },
+    { accountCode: ACCOUNTS.INVENTORY, debit: 0, credit: params.inventoryValue },
+  ];
 }
 
 /**
@@ -201,12 +247,28 @@ export function paymentMadePosting(params: {
 }
 
 /**
- * Stock write-off (damage/expired) → Stock Loss Expense Dr, Inventory Cr
+ * Stock write-off → Stock Loss Expense Dr, Inventory Cr.
+ *
+ * Used for damage and expiry, and for a stock count that finds less than the
+ * books say. `amount` is the weighted-average value of the units removed.
  */
 export function stockWriteOffPosting(params: { amount: Numeric }): PostingLine[] {
   return [
     { accountCode: ACCOUNTS.STOCK_LOSS, debit: params.amount, credit: 0 },
     { accountCode: ACCOUNTS.INVENTORY, debit: 0, credit: params.amount },
+  ];
+}
+
+/**
+ * Stock gain from a count → Inventory Dr, Stock Loss Cr.
+ *
+ * The mirror of a write-off, booked to the same account so a business's net
+ * shrinkage is a single figure: losses debit it, gains credit it.
+ */
+export function stockGainPosting(params: { amount: Numeric }): PostingLine[] {
+  return [
+    { accountCode: ACCOUNTS.INVENTORY, debit: params.amount, credit: 0 },
+    { accountCode: ACCOUNTS.STOCK_LOSS, debit: 0, credit: params.amount },
   ];
 }
 

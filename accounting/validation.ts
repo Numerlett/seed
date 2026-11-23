@@ -1,12 +1,8 @@
 import Decimal from 'decimal.js';
-import { Numeric, PostingLine } from './types';
+import { PostingLine } from './types';
+import { money as dec } from './money';
 
 const ZERO = new Decimal(0);
-
-function dec(value: Numeric | null | undefined): Decimal {
-  if (value === null || value === undefined || value === '') return ZERO;
-  return value instanceof Decimal ? value : new Decimal(value);
-}
 
 /**
  * Validates that journal entry lines are balanced. Throws if not.
