@@ -60,3 +60,45 @@ export function callerContext(userId: string) {
 export function uniqueSuffix(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+/**
+ * Asserts the two invariants every set of books must satisfy, whatever
+ * documents produced them:
+ *
+ *   1. Total debits equal total credits.
+ *   2. Assets equal liabilities plus equity, once current-period earnings are
+ *      counted as equity.
+ *
+ * Call it at the end of any test that posts. Both held vacuously before this
+ * pass — (2) was never checked at all, and the balance sheet was out by the
+ * period's profit for every business that had ever traded.
+ */
+export async function assertBooksBalance(
+  caller: {
+    accounting: {
+      getTrialBalance: (input: { businessId: string; asOf?: Date }) => Promise<{
+        totals: { debit: number; credit: number };
+      }>;
+      getBalanceSheet: (input: { businessId: string; asOf: Date }) => Promise<{
+        difference: number;
+        balanced: boolean;
+      }>;
+    };
+  },
+  businessId: string,
+  asOf: Date = new Date(Date.now() + 24 * 60 * 60 * 1000),
+): Promise<void> {
+  const trial = await caller.accounting.getTrialBalance({ businessId });
+  if (trial.totals.debit !== trial.totals.credit) {
+    throw new Error(
+      `Trial balance does not balance: debits=${trial.totals.debit}, credits=${trial.totals.credit}`,
+    );
+  }
+
+  const sheet = await caller.accounting.getBalanceSheet({ businessId, asOf });
+  if (!sheet.balanced) {
+    throw new Error(
+      `Balance sheet does not balance: out by ${sheet.difference}`,
+    );
+  }
+}

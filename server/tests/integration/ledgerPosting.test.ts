@@ -1,5 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { callerContext, hasDatabase, uniqueSuffix } from './setup';
+import {
+  assertBooksBalance,
+  callerContext,
+  hasDatabase,
+  uniqueSuffix,
+} from './setup';
 import { prisma } from '@seed/database';
 import { appRouter } from '../../routers';
 import { ACCOUNTS } from '@seed/accounting';
@@ -260,5 +265,30 @@ describe.skipIf(!hasDatabase)('documents post to the ledger', () => {
     expect(trial.rows.length).toBeGreaterThan(0);
     // The whole point of double entry: totals must agree exactly.
     expect(trial.totals.debit).toBe(trial.totals.credit);
+  });
+
+  it('produces a balance sheet that balances', async () => {
+    // By this point the suite has posted invoices, purchases and returns, so
+    // income and expense both carry balances. The statement used to ignore
+    // them entirely and was out by exactly the net profit.
+    const sheet = await caller.accounting.getBalanceSheet({
+      businessId,
+      asOf: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    });
+
+    expect(sheet.difference).toBe(0);
+    expect(sheet.balanced).toBe(true);
+
+    // And the earnings line is the profit, not a placeholder.
+    const pnl = await caller.accounting.getProfitAndLoss({
+      businessId,
+      dateFrom: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000),
+      dateTo: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    });
+    expect(sheet.retainedEarnings).toBe(pnl.netProfit);
+  });
+
+  it('keeps the books balanced after every document type', async () => {
+    await expect(assertBooksBalance(caller, businessId)).resolves.toBeUndefined();
   });
 });

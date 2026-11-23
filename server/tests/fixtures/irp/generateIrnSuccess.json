@@ -1,0 +1,12 @@
+{
+  "AckNo": 112010036874523,
+  "AckDt": "04/09/2026 14:35:09",
+  "Irn": "a5c12dca8ded4d949e6b6d8bcbe5c93d4bb4e2c2ee0d1e6c0d5b9d0f5a3e7c1b",
+  "SignedInvoice": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.TRUNCATED_FOR_FIXTURE.signature",
+  "SignedQRCode": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.TRUNCATED_QR_FOR_FIXTURE.signature",
+  "Status": "ACT",
+  "EwbNo": null,
+  "EwbDt": null,
+  "EwbValidTill": null,
+  "Remarks": null
+}
