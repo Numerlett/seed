@@ -105,6 +105,34 @@ const envSchema = z
       )
       .optional(),
 
+    // Outbound integrations.
+    //
+    // All optional: a deployment that has not signed up for a GST Suvidha
+    // Provider or a payment gateway still runs, and the features that need
+    // them refuse with a clear message instead of failing obscurely. The
+    // authoritative per-integration requirements live in
+    // integrations/config.ts, which is what the runtime checks.
+    EMAIL_PROVIDER: z.enum(['smtp', 'resend']).optional(),
+    RESEND_API_KEY: z.string().optional(),
+    RESEND_MAIL: z.string().email('RESEND_MAIL must be a valid email').optional(),
+
+    SMS_PROVIDER: z.enum(['msg91', 'twilio']).optional(),
+    WHATSAPP_PROVIDER: z.enum(['twilio', 'gupshup']).optional(),
+
+    GSP_BASE_URL: z.string().url('GSP_BASE_URL must be a valid URL').optional(),
+    GSP_CLIENT_ID: z.string().optional(),
+    GSP_CLIENT_SECRET: z.string().optional(),
+    GSP_USERNAME: z.string().optional(),
+    GSP_PASSWORD: z.string().optional(),
+    GSP_GSTIN: z
+      .string()
+      .length(15, 'GSP_GSTIN must be 15 characters')
+      .optional(),
+
+    RAZORPAY_KEY_ID: z.string().optional(),
+    RAZORPAY_KEY_SECRET: z.string().optional(),
+    RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
+
     // Optional Test Configuration
     TEST_MAIL: z.string().email('TEST_MAIL must be a valid email').optional(),
     TEST_OTP: z
@@ -113,6 +141,22 @@ const envSchema = z
       .optional(),
   })
   .superRefine((data, ctx) => {
+    // Razorpay credentials without a webhook secret is the dangerous
+    // half-configuration: links go out, customers pay, and nothing can be
+    // recorded because the confirmation cannot be verified.
+    if (
+      (data.RAZORPAY_KEY_ID || data.RAZORPAY_KEY_SECRET) &&
+      !data.RAZORPAY_WEBHOOK_SECRET
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['RAZORPAY_WEBHOOK_SECRET'],
+        message:
+          'RAZORPAY_WEBHOOK_SECRET is required when Razorpay keys are set, ' +
+          'otherwise paid links can never be reconciled.',
+      });
+    }
+
     if (data.DEPLOYMENT_MODE === 'long-running' && !data.REDIS_URL) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

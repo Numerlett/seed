@@ -57,6 +57,19 @@ export const paymentsRoutes = t.router({
     )
     .mutation(({ input, ctx }) => ctrl.recordPayment(ctx.businessId, input)),
 
+  // ---------- Hosted payment links ----------
+  createInvoicePaymentLink: businessMemberProcedure
+    .input(z.object({ businessId: z.string(), invoiceId: z.string() }))
+    .mutation(({ input, ctx }) =>
+      ctrl.createInvoicePaymentLink(ctx.businessId, input.invoiceId),
+    ),
+
+  getInvoicePaymentLinks: businessMemberProcedure
+    .input(z.object({ businessId: z.string(), invoiceId: z.string() }))
+    .query(({ input, ctx }) =>
+      ctrl.getInvoicePaymentLinks(ctx.businessId, input.invoiceId),
+    ),
+
   getCheques: businessMemberProcedure
     .input(z.object({ businessId: z.string(), page: z.number().default(1), limit: z.number().default(20) }))
     .query(({ input, ctx }) => ctrl.getCheques(ctx.businessId, input)),

@@ -1,9 +1,11 @@
-import { sendEmailDirect } from '@seed/integrations';
+import { sendEmail } from '../lib/dispatch';
 
 /**
- * Backwards-compatible inline email sender.
- * For new feature code, prefer `sendEmail` from `server/lib/dispatch` so the
- * caller stays mode-agnostic (inline in serverless, queued in long-running).
+ * Sends a transactional email.
+ *
+ * Delegates to `sendEmail` from `server/lib/dispatch`, which keeps the caller
+ * mode-agnostic — inline in serverless, queued in long-running — and refuses
+ * up front when no email provider is configured.
  */
 export default async function sendMail({
   to,
@@ -14,5 +16,5 @@ export default async function sendMail({
   subject: string;
   content: string;
 }) {
-  await sendEmailDirect({ to, subject, html: content });
+  await sendEmail({ to, subject, html: content });
 }

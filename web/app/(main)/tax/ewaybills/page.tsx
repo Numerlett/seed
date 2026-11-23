@@ -8,9 +8,13 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
 import { format } from 'date-fns';
+import { IntegrationGate } from '@/components/main/IntegrationGate';
 
+// Keys match the EWayBillStatus enum. 'ACTIVE' was not one of its values, so
+// every generated bill fell through to the default variant.
 const STATUS_COLORS: Record<string, 'default' | 'outline' | 'secondary' | 'destructive'> = {
-  ACTIVE: 'default',
+  PENDING: 'outline',
+  GENERATED: 'default',
   CANCELLED: 'destructive',
   EXPIRED: 'secondary',
 };
@@ -29,6 +33,12 @@ export default function EWayBillsPage() {
   return (
     <div className="flex flex-col gap-6 p-6">
       <PageTitle title="E-Way Bills" subtitle="Track goods movement with e-way bill numbers" />
+
+      <IntegrationGate id="einvoice">
+        E-way bills are raised through the same GST Suvidha Provider as
+        e-invoicing, and this server has no GSP credentials configured. Existing
+        records are shown below.
+      </IntegrationGate>
 
       <Card>
         <CardContent className="p-0">

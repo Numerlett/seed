@@ -1,4 +1,5 @@
 import axios from 'axios';
+import crypto from 'crypto';
 
 /**
  * Razorpay integration: payment links, QR codes, webhook verification.
@@ -80,11 +81,27 @@ export async function createQrCode(params: {
   return resp.data as { id: string; image_url: string; status: string };
 }
 
-export function verifyWebhookSignature(body: string, signature: string, secret: string): boolean {
-  const crypto = require('crypto');
-  const expected = crypto
-    .createHmac('sha256', secret)
-    .update(body)
-    .digest('hex');
-  return expected === signature;
+/**
+ * Verifies a Razorpay webhook signature.
+ *
+ * `body` must be the exact bytes Razorpay sent. Re-serialising a parsed object
+ * changes key order and whitespace, and the HMAC will never match.
+ *
+ * The comparison is timing-safe: a plain `===` leaks how much of a forged
+ * signature was correct, which is enough to reconstruct one byte at a time.
+ */
+export function verifyWebhookSignature(
+  body: string | Buffer,
+  signature: string,
+  secret: string,
+): boolean {
+  if (!signature || !secret) return false;
+
+  const expected = crypto.createHmac('sha256', secret).update(body).digest('hex');
+  const expectedBuffer = Buffer.from(expected, 'utf8');
+  const providedBuffer = Buffer.from(signature, 'utf8');
+
+  // timingSafeEqual throws on a length mismatch, which is itself a safe answer.
+  if (expectedBuffer.length !== providedBuffer.length) return false;
+  return crypto.timingSafeEqual(expectedBuffer, providedBuffer);
 }

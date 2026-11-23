@@ -347,6 +347,14 @@ export const googleAuthUrl = publicProcedure
   });
 
 export const googleAuthCallback = publicProcedure
+  .use(
+    rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 20,
+      name: 'auth.google',
+      message: 'Too many sign-in attempts. Try again in a few minutes.',
+    }),
+  )
   .input(z.object({ code: z.string() }))
   .mutation(async ({ input: { code }, ctx: { req, res } }) => {
     try {
@@ -400,6 +408,16 @@ export const googleAuthCallback = publicProcedure
  * separated iOS/Android/web client IDs used by the app) in the server env.
  */
 export const googleSignInMobile = publicProcedure
+  // Shares the 'auth.google' budget with the web callback: both exchange a
+  // Google credential for a session, so one budget covers both entry points.
+  .use(
+    rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 20,
+      name: 'auth.google',
+      message: 'Too many sign-in attempts. Try again in a few minutes.',
+    }),
+  )
   .input(z.object({ idToken: z.string().min(1) }))
   .mutation(async ({ input: { idToken }, ctx: { req, res } }) => {
     try {

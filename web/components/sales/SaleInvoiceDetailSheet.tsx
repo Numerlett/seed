@@ -41,6 +41,7 @@ import {
 } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge, formatCurrency, formatDate } from '@/components/shared';
+import { useIntegrationConfigured } from '@/components/main/IntegrationGate';
 import { toast } from 'sonner';
 import type { SaleInvoiceListItem } from '@/types/sales';
 
@@ -99,6 +100,43 @@ export default function SaleInvoiceDetailSheet({
     },
     onError: (err) => toast.error(err.message),
   });
+
+  const einvoiceConfigured = useIntegrationConfigured('einvoice');
+  const razorpayConfigured = useIntegrationConfigured('razorpay');
+
+  const irnMutation = clientTrpc.tax.generateIrn.useMutation({
+    onSuccess: (result) => {
+      toast.success(
+        result?.irn ? `IRN registered: ${result.irn}` : 'IRN generation submitted',
+      );
+      utils.tax.getEInvoices.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const paymentLinkMutation =
+    clientTrpc.payments.createInvoicePaymentLink.useMutation({
+      onSuccess: (link) => {
+        // The customer pays on the provider's page, so the useful outcome is
+        // the URL itself rather than a success toast that says nothing.
+        navigator.clipboard?.writeText(link.shortUrl).catch(() => undefined);
+        toast.success('Payment link created and copied to clipboard');
+      },
+      onError: (err) => toast.error(err.message),
+    });
+
+  const handleGenerateIrn = () => {
+    if (!invoice || !activeBusiness) return;
+    irnMutation.mutate({ businessId: activeBusiness.id, invoiceId: invoice.id });
+  };
+
+  const handleCreatePaymentLink = () => {
+    if (!invoice || !activeBusiness) return;
+    paymentLinkMutation.mutate({
+      businessId: activeBusiness.id,
+      invoiceId: invoice.id,
+    });
+  };
 
   const handleConfirm = () => {
     if (!invoice || !activeBusiness) return;
@@ -247,6 +285,48 @@ export default function SaleInvoiceDetailSheet({
                         </AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>
+                  </>
+                )}
+
+                {detail.status === 'CONFIRMED' && (
+                  <>
+                    {/* Registering the IRN was only reachable from the
+                        e-invoices page, which pointed back here for a control
+                        that did not exist. */}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleGenerateIrn}
+                      disabled={
+                        irnMutation.isPending || einvoiceConfigured === false
+                      }
+                      title={
+                        einvoiceConfigured === false
+                          ? 'E-invoicing is not configured on this server'
+                          : undefined
+                      }
+                    >
+                      Generate IRN
+                    </Button>
+
+                    {detail.paymentStatus !== 'PAID' && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleCreatePaymentLink}
+                        disabled={
+                          paymentLinkMutation.isPending ||
+                          razorpayConfigured === false
+                        }
+                        title={
+                          razorpayConfigured === false
+                            ? 'Online payments are not configured on this server'
+                            : undefined
+                        }
+                      >
+                        Collect online
+                      </Button>
+                    )}
                   </>
                 )}
 

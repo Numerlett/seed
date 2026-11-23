@@ -1,5 +1,6 @@
-import { prisma } from '@seed/database';
+import { prisma, Prisma } from '@seed/database';
 import { TRPCError } from '@trpc/server';
+import { money, sumBy, toMoneyNumber } from '@seed/accounting';
 import {
   computeInvoice,
   toPlainNumbers,
@@ -7,6 +8,18 @@ import {
   stateCodeFromGstin,
 } from '@seed/tax';
 import { resolveSellerStateCode } from '../../../lib/tax';
+import {
+  buildEInvoicePayload,
+  einvoiceInclude,
+} from '../../../lib/einvoice/payload';
+import {
+  cancelEInvoice,
+  generateEInvoice,
+  generateEWayBill,
+} from '../../../lib/dispatch';
+import { IntegrationNotConfiguredError } from '../../../lib/dispatch/errors';
+import { logger } from '../../../helpers/logger';
+import { describeGspError, parseIrpDate } from '../../../lib/einvoice/irp';
 
 // Built-in GST tax rates for India
 const STANDARD_TAX_RATES = [
@@ -103,28 +116,103 @@ export async function computeTaxForLines(
   );
 }
 
+/**
+ * Registers a confirmed invoice with the IRP and stores the IRN it returns.
+ *
+ * Previously this wrote a PENDING row and returned without contacting the
+ * portal, so the UI reported success for an invoice that was never filed and
+ * nothing could ever move it out of PENDING. The call is now real: the row
+ * reaches GENERATED only when the IRP has issued an IRN, and FAILED (with the
+ * portal's own message) when it has not.
+ */
 export async function generateIrn(businessId: string, invoiceId: string) {
   const invoice = await prisma.saleInvoice.findFirst({
     where: { id: invoiceId, businessId },
-    include: {
-      items: { include: { product: true } },
-      customer: { include: { addresses: true } },
-      business: { include: { gstRegistration: true } },
-    },
+    include: einvoiceInclude,
   });
 
   if (!invoice) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
+
+  // A draft can still change; an IRN cannot. Only a frozen invoice may be filed.
+  if (invoice.status !== 'CONFIRMED') {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `Only a confirmed invoice can be registered with the IRP. This one is ${invoice.status}.`,
+    });
+  }
 
   const existing = await prisma.eInvoice.findUnique({ where: { invoiceId } });
   if (existing?.status === 'GENERATED') {
     throw new TRPCError({ code: 'BAD_REQUEST', message: 'IRN already generated for this invoice' });
   }
+  if (existing?.status === 'CANCELLED') {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message:
+        'The IRN for this invoice was cancelled. Issue a credit note instead of re-registering it.',
+    });
+  }
 
-  return prisma.eInvoice.upsert({
-    where: { invoiceId },
-    create: { invoiceId, businessId, status: 'PENDING' },
-    update: { status: 'PENDING', irn: null, ackNo: null, ackDate: null },
-  });
+  // Built before the row is touched: a payload that fails validation must not
+  // leave a PENDING record behind.
+  const payload = buildEInvoicePayload(invoice);
+
+  try {
+    const response = await generateEInvoice(payload);
+
+    // Long-running mode queues the call and returns null; the worker persists
+    // the IRN. Record the in-flight attempt so the UI can show it as pending.
+    if (!response) {
+      return prisma.eInvoice.upsert({
+        where: { invoiceId },
+        create: { invoiceId, businessId, status: 'PENDING' },
+        update: { status: 'PENDING', failureReason: null },
+      });
+    }
+
+    const data = {
+      status: 'GENERATED' as const,
+      irn: response.Irn,
+      // The portal sends the acknowledgement number as a JSON number; the
+      // column is text. Without the coercion a filing that actually succeeded
+      // failed while being written, leaving the invoice registered with the
+      // IRP and no IRN recorded here.
+      ackNo: response.AckNo === null || response.AckNo === undefined
+        ? null
+        : String(response.AckNo),
+      ackDate: parseIrpDate(response.AckDt),
+      signedInvoice: response.SignedInvoice,
+      signedQRCode: response.SignedQRCode,
+      failureReason: null,
+    };
+
+    return await prisma.eInvoice.upsert({
+      where: { invoiceId },
+      create: { invoiceId, businessId, ...data },
+      update: data,
+    });
+  } catch (error) {
+    // A missing GSP configuration is not a filing failure — it never reached
+    // the portal. Let it through untouched so it surfaces as "not configured"
+    // and no misleading FAILED row is written.
+    if (error instanceof IntegrationNotConfiguredError || error instanceof TRPCError) {
+      throw error;
+    }
+
+    const reason = describeGspError(error);
+    await prisma.eInvoice.upsert({
+      where: { invoiceId },
+      create: { invoiceId, businessId, status: 'FAILED', failureReason: reason },
+      update: { status: 'FAILED', failureReason: reason },
+    });
+
+    logger.error({ err: error, invoiceId, businessId }, 'IRN generation failed');
+    throw new TRPCError({
+      code: 'BAD_GATEWAY',
+      message: `The IRP rejected this invoice: ${reason}`,
+      cause: error,
+    });
+  }
 }
 
 export async function cancelIrn(
@@ -133,14 +221,47 @@ export async function cancelIrn(
   reason: string,
   remarks: string,
 ) {
-  const einvoice = await prisma.eInvoice.findUnique({ where: { invoiceId } });
-  if (!einvoice || einvoice.status !== 'GENERATED') {
+  const einvoice = await prisma.eInvoice.findFirst({
+    where: { invoiceId, businessId },
+  });
+  if (!einvoice || einvoice.status !== 'GENERATED' || !einvoice.irn) {
     throw new TRPCError({ code: 'BAD_REQUEST', message: 'No active IRN to cancel' });
+  }
+
+  // The IRP only accepts a cancellation within 24 hours of registration.
+  // Checking here turns a portal rejection into an explanation.
+  const ackDate = einvoice.ackDate ?? einvoice.createdAt;
+  if (Date.now() - ackDate.getTime() > 24 * 60 * 60 * 1000) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message:
+        'An IRN can only be cancelled within 24 hours of generation. ' +
+        'Issue a credit note to reverse this invoice instead.',
+    });
+  }
+
+  try {
+    await cancelEInvoice({
+      irn: einvoice.irn,
+      reason: Number(reason) as 1 | 2 | 3 | 4 | 5,
+      remarks,
+    });
+  } catch (error) {
+    if (error instanceof IntegrationNotConfiguredError || error instanceof TRPCError) {
+      throw error;
+    }
+    const message = describeGspError(error);
+    logger.error({ err: error, invoiceId, businessId }, 'IRN cancellation failed');
+    throw new TRPCError({
+      code: 'BAD_GATEWAY',
+      message: `The IRP refused the cancellation: ${message}`,
+      cause: error,
+    });
   }
 
   return prisma.eInvoice.update({
     where: { invoiceId },
-    data: { status: 'CANCELLATION_PENDING', cancelReason: remarks, cancelledAt: new Date() },
+    data: { status: 'CANCELLED', cancelReason: remarks, cancelledAt: new Date() },
   });
 }
 
@@ -166,6 +287,13 @@ export async function getEInvoices(
   return { items, total, page: input.page, limit: input.limit };
 }
 
+/**
+ * Raises an e-way bill against an invoice that already carries an IRN.
+ *
+ * Like IRN generation, this used to write a PENDING row without calling the
+ * portal. It now files for real and stores the EWB number and validity the
+ * portal returns.
+ */
 export async function generateEwayBill(
   businessId: string,
   input: {
@@ -177,17 +305,69 @@ export async function generateEwayBill(
     vehicleType: string;
   },
 ) {
-  const einvoice = await prisma.eInvoice.findUnique({ where: { invoiceId: input.invoiceId } });
-  if (!einvoice || !einvoice.irn) {
-    throw new TRPCError({ code: 'BAD_REQUEST', message: 'Generate IRN first before creating e-way bill' });
+  const einvoice = await prisma.eInvoice.findFirst({
+    where: { invoiceId: input.invoiceId, businessId },
+  });
+  if (!einvoice || !einvoice.irn || einvoice.status !== 'GENERATED') {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Generate IRN first before creating e-way bill',
+    });
   }
 
   const { invoiceId, ...rest } = input;
-  return prisma.eWayBill.upsert({
-    where: { invoiceId },
-    create: { invoiceId, businessId, status: 'PENDING', ...rest },
-    update: { status: 'PENDING', ...rest },
-  });
+
+  try {
+    const response = await generateEWayBill({
+      Irn: einvoice.irn,
+      Distance: input.distance,
+      TransMode: input.transportMode as '1' | '2' | '3' | '4',
+      TransId: input.transporterId,
+      VehNo: input.vehicleNo,
+      VehType: input.vehicleType as 'R' | 'O',
+    });
+
+    if (!response) {
+      return prisma.eWayBill.upsert({
+        where: { invoiceId },
+        create: { invoiceId, businessId, status: 'PENDING', ...rest },
+        update: { status: 'PENDING', failureReason: null, ...rest },
+      });
+    }
+
+    const data = {
+      status: 'GENERATED' as const,
+      ewbNo: String(response.EwbNo),
+      ewbDate: parseIrpDate(response.EwbDt),
+      validUpto: parseIrpDate(response.EwbValidTill),
+      failureReason: null,
+      ...rest,
+    };
+
+    return await prisma.eWayBill.upsert({
+      where: { invoiceId },
+      create: { invoiceId, businessId, ...data },
+      update: data,
+    });
+  } catch (error) {
+    if (error instanceof IntegrationNotConfiguredError || error instanceof TRPCError) {
+      throw error;
+    }
+
+    const reason = describeGspError(error);
+    await prisma.eWayBill.upsert({
+      where: { invoiceId },
+      create: { invoiceId, businessId, status: 'PENDING', failureReason: reason, ...rest },
+      update: { status: 'PENDING', failureReason: reason, ...rest },
+    });
+
+    logger.error({ err: error, invoiceId, businessId }, 'E-way bill generation failed');
+    throw new TRPCError({
+      code: 'BAD_GATEWAY',
+      message: `The portal rejected this e-way bill: ${reason}`,
+      cause: error,
+    });
+  }
 }
 
 export async function getEWayBills(
@@ -242,8 +422,13 @@ export async function getGstr1Preview(businessId: string, month: number, year: n
   ]);
 
   const b2b = invoices.filter((inv) => inv.customer?.gstin);
-  const sum = <T,>(rows: T[], pick: (row: T) => unknown) =>
-    rows.reduce((s, row) => s + (pick(row) ? Number(pick(row)) : 0), 0);
+
+  // Decimal accumulation, converted once per figure. Summing the `Number()`
+  // forms drifts — a month of invoices can file a return that is a paisa off
+  // the documents behind it, which is exactly the mismatch a GST notice is
+  // raised over.
+  const sum = <T,>(rows: T[], pick: (row: T) => Prisma.Decimal | null) =>
+    sumBy(rows, pick);
 
   return {
     period: `${month.toString().padStart(2, '0')}/${year}`,
@@ -277,24 +462,33 @@ export async function getGstr1Preview(businessId: string, month: number, year: n
     })),
     // Gross outward supply, before credit notes are applied.
     summary: {
-      taxableAmount: sum(invoices, (i) => i.taxableAmount),
-      cgst: sum(invoices, (i) => i.cgstAmount),
-      sgst: sum(invoices, (i) => i.sgstAmount),
-      igst: sum(invoices, (i) => i.igstAmount),
+      taxableAmount: toMoneyNumber(sum(invoices, (i) => i.taxableAmount)),
+      cgst: toMoneyNumber(sum(invoices, (i) => i.cgstAmount)),
+      sgst: toMoneyNumber(sum(invoices, (i) => i.sgstAmount)),
+      igst: toMoneyNumber(sum(invoices, (i) => i.igstAmount)),
     },
     creditNoteSummary: {
-      taxableAmount: sum(creditNotes, (c) => c.taxableAmount),
-      cgst: sum(creditNotes, (c) => c.cgstAmount),
-      sgst: sum(creditNotes, (c) => c.sgstAmount),
-      igst: sum(creditNotes, (c) => c.igstAmount),
+      taxableAmount: toMoneyNumber(sum(creditNotes, (c) => c.taxableAmount)),
+      cgst: toMoneyNumber(sum(creditNotes, (c) => c.cgstAmount)),
+      sgst: toMoneyNumber(sum(creditNotes, (c) => c.sgstAmount)),
+      igst: toMoneyNumber(sum(creditNotes, (c) => c.igstAmount)),
     },
     // What is actually payable: supplies less the credit notes against them.
     netSummary: {
-      taxableAmount:
-        sum(invoices, (i) => i.taxableAmount) - sum(creditNotes, (c) => c.taxableAmount),
-      cgst: sum(invoices, (i) => i.cgstAmount) - sum(creditNotes, (c) => c.cgstAmount),
-      sgst: sum(invoices, (i) => i.sgstAmount) - sum(creditNotes, (c) => c.sgstAmount),
-      igst: sum(invoices, (i) => i.igstAmount) - sum(creditNotes, (c) => c.igstAmount),
+      taxableAmount: toMoneyNumber(
+        sum(invoices, (i) => i.taxableAmount).minus(
+          sum(creditNotes, (c) => c.taxableAmount),
+        ),
+      ),
+      cgst: toMoneyNumber(
+        sum(invoices, (i) => i.cgstAmount).minus(sum(creditNotes, (c) => c.cgstAmount)),
+      ),
+      sgst: toMoneyNumber(
+        sum(invoices, (i) => i.sgstAmount).minus(sum(creditNotes, (c) => c.sgstAmount)),
+      ),
+      igst: toMoneyNumber(
+        sum(invoices, (i) => i.igstAmount).minus(sum(creditNotes, (c) => c.igstAmount)),
+      ),
     },
   };
 }
@@ -333,11 +527,14 @@ export async function getGstr3bPreview(businessId: string, month: number, year: 
     }),
   ]);
 
+  // Subtracted as Decimal. Two exact 2-decimal values converted to `number`
+  // first can differ from their true difference by a fraction of a paisa, and
+  // this figure is filed.
   const net = (
     gross: typeof salesAgg._sum,
     reversal: typeof salesAgg._sum,
     field: keyof typeof salesAgg._sum,
-  ) => Number(gross[field] ?? 0) - Number(reversal[field] ?? 0);
+  ) => toMoneyNumber(money(gross[field]).minus(money(reversal[field])));
 
   return {
     period: `${month.toString().padStart(2, '0')}/${year}`,
@@ -357,22 +554,22 @@ export async function getGstr3bPreview(businessId: string, month: number, year: 
     // The gross figures and their reversals, kept separate so a filing can be
     // reconciled line by line rather than only in aggregate.
     outwardGross: {
-      taxableAmount: Number(salesAgg._sum.taxableAmount ?? 0),
-      cgst: Number(salesAgg._sum.cgstAmount ?? 0),
-      sgst: Number(salesAgg._sum.sgstAmount ?? 0),
-      igst: Number(salesAgg._sum.igstAmount ?? 0),
+      taxableAmount: toMoneyNumber(salesAgg._sum.taxableAmount),
+      cgst: toMoneyNumber(salesAgg._sum.cgstAmount),
+      sgst: toMoneyNumber(salesAgg._sum.sgstAmount),
+      igst: toMoneyNumber(salesAgg._sum.igstAmount),
     },
     creditNotes: {
-      taxableAmount: Number(creditNoteAgg._sum.taxableAmount ?? 0),
-      cgst: Number(creditNoteAgg._sum.cgstAmount ?? 0),
-      sgst: Number(creditNoteAgg._sum.sgstAmount ?? 0),
-      igst: Number(creditNoteAgg._sum.igstAmount ?? 0),
+      taxableAmount: toMoneyNumber(creditNoteAgg._sum.taxableAmount),
+      cgst: toMoneyNumber(creditNoteAgg._sum.cgstAmount),
+      sgst: toMoneyNumber(creditNoteAgg._sum.sgstAmount),
+      igst: toMoneyNumber(creditNoteAgg._sum.igstAmount),
     },
     debitNotes: {
-      taxableAmount: Number(debitNoteAgg._sum.taxableAmount ?? 0),
-      cgst: Number(debitNoteAgg._sum.cgstAmount ?? 0),
-      sgst: Number(debitNoteAgg._sum.sgstAmount ?? 0),
-      igst: Number(debitNoteAgg._sum.igstAmount ?? 0),
+      taxableAmount: toMoneyNumber(debitNoteAgg._sum.taxableAmount),
+      cgst: toMoneyNumber(debitNoteAgg._sum.cgstAmount),
+      sgst: toMoneyNumber(debitNoteAgg._sum.sgstAmount),
+      igst: toMoneyNumber(debitNoteAgg._sum.igstAmount),
     },
   };
 }
