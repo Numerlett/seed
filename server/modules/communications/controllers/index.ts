@@ -1,5 +1,8 @@
 import { prisma } from '@seed/database';
 import { TRPCError } from '@trpc/server';
+import { sendEmail, sendSms, sendWhatsApp } from '../../../lib/dispatch';
+import { IntegrationNotConfiguredError } from '../../../lib/dispatch/errors';
+import { logger } from '../../../helpers/logger';
 
 type MessageType =
   | 'INVOICE'
@@ -212,10 +215,56 @@ export async function logMessage(
 }
 
 /**
- * Render a template by id with the provided variables, then enqueue a log entry.
- * Returns the log id and rendered body so callers can preview before sending.
+ * Renders a template without sending or logging anything, so the UI can show
+ * the user exactly what will go out before they commit to sending it.
  */
-export async function renderAndLog(
+export async function previewTemplate(
+  businessId: string,
+  input: { templateId: string; variables: Record<string, string | number> },
+) {
+  const template = await getMessageTemplateById(businessId, input.templateId);
+  return {
+    channel: template.channel,
+    subject: template.subject
+      ? renderTemplate(template.subject, input.variables)
+      : undefined,
+    body: renderTemplate(template.body, input.variables),
+  };
+}
+
+/** Maps a template channel onto the dispatch call that delivers it. */
+async function deliver(
+  channel: MessageChannel,
+  args: { to: string; subject?: string; body: string },
+): Promise<void> {
+  switch (channel) {
+    case 'EMAIL':
+      await sendEmail({
+        to: args.to,
+        subject: args.subject ?? 'Message from SEED',
+        html: args.body,
+      });
+      return;
+    case 'SMS':
+      await sendSms({ to: args.to, message: args.body });
+      return;
+    case 'WHATSAPP':
+      await sendWhatsApp({ to: args.to, message: args.body });
+      return;
+  }
+}
+
+/**
+ * Renders a template and actually delivers it, recording the outcome.
+ *
+ * This function used to render the message, write a log row and return —
+ * without ever contacting a provider. The log said the message existed, the
+ * customer never received anything, and nothing in the system revealed the
+ * difference. The log row is now written before the attempt and updated with
+ * the true result, so a SENT row means a provider accepted the message and a
+ * FAILED row carries the reason.
+ */
+export async function sendMessage(
   businessId: string,
   input: {
     templateId: string;
@@ -241,7 +290,46 @@ export async function renderAndLog(
     referenceId: input.referenceId,
   });
 
-  return { logId: log.id, body: renderedBody, subject: renderedSubject };
+  try {
+    await deliver(template.channel as MessageChannel, {
+      to: input.to,
+      subject: renderedSubject,
+      body: renderedBody,
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    await prisma.messageLog.update({
+      where: { id: log.id },
+      data: { status: 'FAILED', error: reason },
+    });
+
+    // An unconfigured provider is a deployment problem, not a delivery failure.
+    // Rethrowing it unwrapped lets the central handler report it as
+    // PRECONDITION_FAILED so the user is told to set the channel up.
+    if (error instanceof IntegrationNotConfiguredError) throw error;
+
+    logger.error(
+      { err: error, logId: log.id, channel: template.channel },
+      'Message delivery failed',
+    );
+    throw new TRPCError({
+      code: 'BAD_GATEWAY',
+      message: `Could not send this ${template.channel.toLowerCase()} message: ${reason}`,
+      cause: error,
+    });
+  }
+
+  const sent = await prisma.messageLog.update({
+    where: { id: log.id },
+    data: { status: 'SENT', sentAt: new Date(), error: null },
+  });
+
+  return {
+    logId: sent.id,
+    status: sent.status,
+    body: renderedBody,
+    subject: renderedSubject,
+  };
 }
 
 // ---------- Preferences ----------

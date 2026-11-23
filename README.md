@@ -2,6 +2,9 @@
 
 SEED is a modern, full-stack retail management system that helps businesses track sales, manage inventory, monitor expenses, and make data-driven decisions—all in one clean, efficient dashboard.
 
+> **Picking this project up?** Start with [docs/HANDOVER.md](docs/HANDOVER.md): the current state, how to run and
+> verify it, the decisions that were made, the known gaps and a prioritised backlog.
+
 ## 🏗️ Architecture Overview
 
 SEED is built as a **monorepo** using **pnpm workspaces**, with clear separation between frontend, backend, API layer, and database packages.
@@ -9,7 +12,7 @@ SEED is built as a **monorepo** using **pnpm workspaces**, with clear separation
 ### Technology Stack
 
 - **Frontend**: Next.js 16, React 19, TailwindCSS, Radix UI, Framer Motion
-- **Mobile**: React Native (Expo SDK 56), Expo Router, NativeWind — shares the same backend, `@seed/api` types, and `@seed/schemas` (full guide: [docs/mobile.md](docs/mobile.md))
+- **Mobile**: React Native (Expo SDK 56), Expo Router, NativeWind — shares the same backend, `@seed/api` types, and `@seed/schemas` (full guide: [docs/MOBILE.md](docs/MOBILE.md))
 - **Backend**: Express.js, tRPC for type-safe APIs
 - **Database**: PostgreSQL with Prisma ORM
 - **Authentication**: JWT tokens with refresh token rotation
@@ -17,7 +20,8 @@ SEED is built as a **monorepo** using **pnpm workspaces**, with clear separation
 - **OAuth**: Google OAuth 2.0 integration
 - **Type Safety**: TypeScript throughout the entire stack
 - **Containerization**: Docker support for server deployment
-- **Deployment modes**: `long-running` (Redis + BullMQ workers) or `serverless` (no Redis, no workers, scheduled features disabled). Selected via `DEPLOYMENT_MODE` env. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#deployment-modes).
+- **Deployment modes**: `long-running` (Redis + BullMQ workers) or `serverless` (no Redis, no workers, scheduled features disabled). Selected via `DEPLOYMENT_MODE` env. `long-running` currently refuses to boot because no worker consumes the queues — deploy `serverless`. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#deployment-modes).
+- **Tax and money**: [@seed/tax](tax/engine.ts) is the only place GST is computed; money is `Decimal` end to end, never `number`. The GST breakup is frozen at confirmation and the invoice PDF renders the stored figures, so the printed document matches what was filed.
 
 ---
 
@@ -25,152 +29,42 @@ SEED is built as a **monorepo** using **pnpm workspaces**, with clear separation
 
 ```
 seed/
-├── api/                    # tRPC client & server exports
-│   ├── client.ts          # tRPC client configuration
-│   ├── server.ts          # Server-side tRPC utilities
-│   ├── Provider.tsx       # React Query + tRPC provider
-│   └── types.ts           # Shared API types
+├── accounting/      # @seed/accounting: double-entry postings, journal validation, exact-decimal money helpers
+├── api/             # @seed/api: tRPC client config and React Query provider (types come from the server)
+├── database/        # @seed/database: Prisma schema (models/*.prisma), migrations/, client, seed-admin.ts
+├── integrations/    # @seed/integrations: outbound adapters (email, SMS, WhatsApp, GSP e-invoicing, Razorpay)
+│                    #   and config.ts, which detects whether each one has credentials
+├── jobs/            # @seed/jobs: BullMQ queue definitions (no workers yet)
+├── mobile/          # Expo / React Native app, see mobile/README.md
+├── pdf/             # @seed/pdf: invoice PDF template
+├── schemas/         # @seed/schemas: Zod schemas shared by server routers and web forms
+├── tax/             # @seed/tax: GST engine, the only place GST is calculated
 │
-├── mobile/               # React Native (Expo) app — see mobile/README.md
-│   ├── app/              # Expo Router screens (auth, tabs, module CRUD)
-│   ├── components/       # Forms, line-item editor, UI kit
-│   ├── lib/             # tRPC client, secure token store, utils
-│   └── providers/       # Session & Business context (mobile)
+├── server/          # @seed/server: Express + tRPC backend
+│   ├── index.ts         # entry point: env validation, rate limits, webhooks, graceful shutdown
+│   ├── controllers/     # core modules: auth, business, inventory, category, party, warehouse, batch,
+│   │                    #   stock, stockops, purchase, sales, returns, dashboard, admin/
+│   ├── modules/         # newer domain modules (controllers + routers): tax, accounting, payments,
+│   │                    #   communications, reports, crm, manufacturing
+│   ├── routers/         # tRPC routers for the core modules; routers/index.ts mounts everything
+│   ├── lib/             # shared server logic: dispatch/ (queueable work), tax/, accounting/ (postJournalEntry),
+│   │                    #   einvoice/, payments/ (Razorpay webhook), pdf/
+│   ├── helpers/         # inventoryLedger.ts, documentNumber.ts, dateRange.ts, auth, mail, env validation
+│   ├── trpc/            # procedure tiers, middlewares, context, rate limiting
+│   └── tests/           # unit/ (mocked DB), integration/ (real Postgres), fixtures/
 │
-├── database/              # Database layer with Prisma
-│   ├── schema.prisma      # Base schema (generator + datasource)
-│   ├── prisma.config.ts   # Prisma config (env loading)
-│   ├── models/            # Multi-file Prisma schema
-│   │   ├── user.prisma    # User, Auth, Admin, AuditLog, SystemSetting
-│   │   ├── business.prisma # Business model
-│   │   ├── product.prisma # Product model
-│   │   ├── inventory.prisma # Inventory models
-│   │   ├── sales.prisma   # Sales models
-│   │   ├── purchase.prisma # Purchase models
-│   │   ├── warehouse.prisma # Warehouse model
-│   │   ├── party.prisma   # Party model
-│   │   └── stockops.prisma # Stock operations
-│   ├── migrations/        # Migration history
-│   ├── generated/         # Generated Prisma Client
-│   ├── seed-admin.ts      # CLI to bootstrap admin users
-│   ├── client.ts          # Prisma client instance
-│   └── index.ts           # Database exports
+├── web/             # Next.js 16 frontend
+│   ├── app/             # App Router: (auth), (main) one folder per module, (admin), (public)
+│   ├── components/      # ui/ (shadcn primitives) and per-module components
+│   ├── providers/       # TRPC, Session, Business, Admin, Theme
+│   └── tests/e2e/       # Playwright specs (not run in CI)
 │
-├── server/                # Backend Express + tRPC server
-│   ├── index.ts           # Server entry point
-│   ├── controllers/       # Business logic
-│   │   ├── auth.ts        # Authentication
-│   │   ├── batch.ts       # Batch operations
-│   │   ├── business.ts    # Business management
-│   │   ├── category.ts    # Category management
-│   │   ├── dashboard.ts   # Dashboard data
-│   │   ├── inventory.ts   # Inventory management
-│   │   ├── party.ts       # Party management
-│   │   ├── purchase.ts    # Purchase operations
-│   │   ├── returns.ts     # Returns handling
-│   │   ├── sales.ts       # Sales operations
-│   │   ├── stock.ts       # Stock management
-│   │   ├── stockops.ts    # Stock operations
-│   │   ├── warehouse.ts   # Warehouse management
-│   │   └── admin/         # Admin dashboard controllers
-│   │       ├── auth.ts    # Admin auth (getAdminMe)
-│   │       ├── users.ts   # User management
-│   │       ├── businesses.ts # Business management
-│   │       ├── analytics.ts  # Platform analytics
-│   │       ├── settings.ts   # System settings
-│   │       ├── auditLog.ts   # Audit log viewer
-│   │       └── management.ts # Admin CRUD (super admin)
-│   ├── routers/           # tRPC router definitions
-│   │   ├── auth.ts        # Auth routes
-│   │   ├── batch.ts       # Batch routes
-│   │   ├── business.ts    # Business routes
-│   │   ├── category.ts    # Category routes
-│   │   ├── dashboard.ts   # Dashboard routes
-│   │   ├── inventory.ts   # Inventory routes
-│   │   ├── party.ts       # Party routes
-│   │   ├── purchase.ts    # Purchase routes
-│   │   ├── returns.ts     # Returns routes
-│   │   ├── s3.ts          # S3 file upload routes
-│   │   ├── sales.ts       # Sales routes
-│   │   ├── stock.ts       # Stock routes
-│   │   ├── stockops.ts    # Stock operations routes
-│   │   ├── warehouse.ts   # Warehouse routes
-│   │   ├── index.ts       # Root router
-│   │   └── admin/         # Admin routes (admin.*)
-│   │       └── index.ts   # Barrel combining sub-routers
-│   ├── trpc/              # tRPC setup
-│   │   ├── index.ts       # tRPC initialization
-│   │   ├── context.ts     # Request context
-│   │   ├── middlewares.ts # Auth + admin middleware
-│   │   └── procedures.ts  # Public/protected/admin procedures
-│   ├── helpers/           # Utility functions
-│   │   ├── auth.ts        # Auth utilities
-│   │   ├── adminAuth.ts   # Admin audit logging
-│   │   ├── controllerErrorHandler.ts # Error handler
-│   │   ├── documentNumber.ts # Doc number generation
-│   │   ├── googleClient.ts # Google OAuth setup
-│   │   ├── handlePrismaError.ts # Prisma error mapping
-│   │   ├── index.ts       # Helper exports
-│   │   ├── inventoryLedger.ts # Inventory ledger logic
-│   │   ├── sendMail.ts    # Email service
-│   │   ├── tokenManagement.ts # Token handling
-│   │   ├── validateENV.ts # Env validation
-│   │   ├── aws/           # AWS utilities
-│   │   └── email-templates/ # Email HTML templates
-│   └── types/             # Backend TypeScript types
-│
-└── web/                   # Next.js frontend application
-    ├── app/               # Next.js App Router
-    │   ├── (auth)/        # Auth route group
-    │   │   ├── login/     # Login page
-    │   │   └── auth/      # OTP verification
-    │   ├── (main)/        # Protected routes
-    │   │   ├── dashboard/ # Dashboard page
-    │   │   └── businesses/ # Business management
-    │   ├── (admin)/       # Admin dashboard route group
-    │   │   └── admin/     # Admin pages
-    │   │       ├── page.tsx       # Dashboard overview
-    │   │       ├── users/         # User management
-    │   │       ├── businesses/    # Business management
-    │   │       ├── analytics/     # Platform analytics
-    │   │       ├── audit-log/     # Audit log viewer
-    │   │       ├── settings/      # System settings
-    │   │       └── admins/        # Admin management
-    │   └── (public)/      # Public routes
-    │       └── page.tsx   # Landing page
-    ├── components/        # React components
-    │   ├── ui/            # Radix UI primitives (shadcn)
-    │   ├── admin/         # Admin panel components
-    │   │   ├── AdminGuard.tsx  # Auth + admin access gate
-    │   │   ├── AdminNavBar.tsx # Sidebar navigation
-    │   │   └── AdminHeader.tsx # Top header bar
-    │   ├── animations/    # Animation components
-    │   ├── auth/          # Auth components
-    │   ├── batches/       # Batch components
-    │   ├── dashboard/     # Dashboard widgets
-    │   ├── home/          # Landing page sections
-    │   ├── inventory/     # Inventory components
-    │   ├── main/          # Main layout components
-    │   ├── parties/       # Party components
-    │   ├── profile/       # Profile components
-    │   ├── purchases/     # Purchase components
-    │   ├── returns/       # Returns components
-    │   ├── sales/         # Sales components
-    │   ├── shared/        # Shared components
-    │   ├── stock/         # Stock components
-    │   ├── stockops/      # Stock operations components
-    │   └── warehouses/    # Warehouse components
-    ├── providers/         # React context providers
-    │   ├── AdminProvider.tsx    # Admin context (role, status)
-    │   ├── BusinessProvider.tsx # Business context
-    │   ├── CategoriesProvider.tsx # Categories context
-    │   ├── DataProvider.tsx     # Data provider
-    │   ├── SessionProvider.tsx  # Auth session
-    │   ├── ThemeProvider.tsx    # Dark/Light mode
-    │   └── TRPCProvider.tsx    # API client
-    ├── auth/              # Auth utilities
-    ├── hooks/             # Custom React hooks
-    └── lib/               # Utilities and helpers
+├── docs/            # project documentation, start with HANDOVER.md
+├── scripts/         # server-docker.sh
+├── AUDIT.md         # dated audit log
+├── CLAUDE.md        # rules and invariants (written for Claude Code, a good summary for people too)
+├── Dockerfile.server, fly.toml   # server container and Fly.io deployment
+└── vitest.workspace.ts           # one vitest run across server (unit + integration), schemas, tax, accounting
 ```
 
 ---
@@ -234,8 +128,8 @@ Response back through chain
 
 ### Prerequisites
 
-- **Node.js**: v20 or higher
-- **pnpm**: v8 or higher (install with `npm install -g pnpm`)
+- **Node.js**: v24 or higher (`engines` in the root `package.json`; CI runs 24)
+- **pnpm**: v11, pinned by `packageManager` in the root `package.json` (`corepack enable` picks it up)
 - **PostgreSQL**: v14 or higher (running instance)
 - **Git**: For cloning the repository
 
@@ -256,56 +150,56 @@ Response back through chain
 
 3. **Set up environment variables**
 
-   **Server (`server/.env`):**
+   Copy the examples and fill them in. They are the authoritative, commented lists:
 
-   ```env
-   # Database
-   DATABASE_URL="postgresql://user:password@localhost:5432/seed_db"
-
-   # Server
-   PORT=8080
-   NODE_ENV=development
-   FRONTEND_URL=http://localhost:3000
-
-   # JWT Secrets (generate with: openssl rand -base64 32)
-   ACCESS_TOKEN_SECRET=your_access_token_secret
-   REFRESH_TOKEN_SECRET=your_refresh_token_secret
-
-   # Email (SMTP)
-   EMAIL_HOST=smtp.gmail.com
-   EMAIL_PORT=587
-   EMAIL_USER=your-email@gmail.com
-   EMAIL_PASSWORD=your-app-password
-   EMAIL_FROM=noreply@yourdomain.com
-
-   # Google OAuth
-   GOOGLE_CLIENT_ID=your_google_client_id
-   GOOGLE_CLIENT_SECRET=your_google_client_secret
-   GOOGLE_REDIRECT_URI=http://localhost:8080/api/auth.googleCallback
-
-   # Test User (development only)
-   TEST_USER_EMAIL=test@example.com
-   TEST_USER_OTP=123456
+   ```bash
+   cp server/.env.example server/.env
+   cp web/.env.example web/.env
+   cp mobile/.env.example mobile/.env   # only if you work on the mobile app
    ```
 
-   **Web (`web/.env.local`):**
+   The server validates its environment with the Zod schema in
+   [server/helpers/validateENV.ts](server/helpers/validateENV.ts) and refuses to
+   boot if it fails, naming the variable. These are required:
 
-   ```env
-   NEXT_PUBLIC_SERVER_BASE_URL=http://localhost:8080
-   ```
+   | Variable | Notes |
+   | --- | --- |
+   | `PORT`, `FRONTEND_URL` | e.g. `8080` and `http://localhost:3000` (`FRONTEND_URL` is the CORS allow-list, comma-separated) |
+   | `DATABASE_URL` | Your local Postgres, e.g. `postgresql://user:pass@localhost:5432/seed` |
+   | `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET` | At least 32 characters each (`openssl rand -base64 48`) |
+   | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Required by the schema; placeholders work if you do not use Google login |
+   | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_MAIL` | Mail for OTP login. Required even when `EMAIL_PROVIDER=resend` |
+   | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_BUCKET_NAME` | S3 uploads (product images) |
+   | `DEPLOYMENT_MODE` | Set `serverless` (the example does). The schema default, `long-running`, refuses to boot until BullMQ workers exist |
+
+   `TEST_MAIL` and `TEST_OTP` are development-only: they let one address log in
+   with a fixed OTP, so you do not need working mail locally.
+
+   SMS, WhatsApp, e-invoicing (GSP) and Razorpay are optional and ship commented
+   out in `server/.env.example`. Absent credentials disable the feature instead of
+   blocking boot.
+
+   `web/.env` needs `NEXT_PUBLIC_SERVER_BASE_URL=http://localhost:8080` and an
+   `ACCESS_TOKEN_SECRET` equal to the server's, because Next.js middleware
+   verifies the JWT.
 
 4. **Set up the database**
 
    ```bash
-   # Generate Prisma Client
-   pnpm --filter @seed/database db:generate
-
-   # Run migrations
-   pnpm --filter @seed/database db:migrate
+   # Create an empty database first (for example: createdb seed), then apply every migration
+   pnpm --filter @seed/database db:deploy
 
    # (Optional) Open Prisma Studio to view data
    pnpm --filter @seed/database db:studio
    ```
+
+   `db:deploy` brings a database up to date and never creates anything. Use
+   `db:migrate` only when you have changed a model in `database/models/` and want
+   Prisma to generate a new migration (see [Database Changes](#database-changes)).
+   The Prisma client is generated by `pnpm build` (step 5).
+
+   To make yourself an admin, log in once, then run
+   `cd database && npx tsx seed-admin.ts <your-email> --super`.
 
 5. **Build packages**
    ```bash
@@ -418,15 +312,17 @@ pnpm dev      # Start all packages in dev mode
 pnpm build    # Build all packages
 pnpm start    # Start all packages in production
 pnpm clean    # Clean build artifacts
-pnpm lint     # Lint all packages
+pnpm lint     # tsc --noEmit on every package; ESLint on web (web types are checked by `pnpm build`)
+pnpm test     # Vitest: unit suites, plus the integration suites when a test database is configured
 ```
 
 ### Database Package
 
 ```bash
 pnpm --filter @seed/database db:generate  # Generate Prisma Client
-pnpm --filter @seed/database db:migrate   # Run migrations
-pnpm --filter @seed/database db:deploy    # Deploy migrations (production)
+pnpm --filter @seed/database db:migrate   # Create a new migration from model changes (dev only)
+pnpm --filter @seed/database db:deploy    # Apply all pending migrations (what CI and Fly run)
+pnpm --filter @seed/database db:drift     # Fail if the schema differs from what the migrations build
 pnpm --filter @seed/database db:studio    # Open Prisma Studio
 ```
 
@@ -496,6 +392,48 @@ pnpm --filter web start     # Start production server
 - Welcome emails for new users
 - OTP delivery with expiration countdown
 - Template preview endpoint for development
+- Delivery goes through `server/lib/dispatch`, so it is inline in serverless
+  mode and queued in long-running mode without the caller knowing
+
+### Accounting and Inventory Accuracy
+
+- **Money never passes through a JavaScript float.** Reports, GST returns and
+  the financial statements accumulate in `Decimal` via
+  [accounting/money.ts](accounting/money.ts) and convert once at the API
+  boundary.
+- **Stock is valued at weighted average.** An issue costs stock at
+  `currentValue / currentQuantity` at the moment it leaves, and the same figure
+  feeds the inventory ledger, the stock valuation and the COGS posting — so
+  gross profit is revenue less what the goods actually cost.
+- **The balance sheet balances.** Current-period earnings are computed from the
+  income and expense accounts and reported within equity; the response carries
+  `difference` and `balanced` so a broken ledger is visible rather than quietly
+  rendered.
+- **Concurrent movements are serialised.** Confirming a document that issues
+  stock locks the products first, so two simultaneous confirmations cannot both
+  spend the same units, and document numbers retry rather than colliding.
+
+### Outbound Integrations
+
+Email, SMS, WhatsApp, e-invoicing (GSP) and online payments (Razorpay) are all
+optional. Each is detected from the environment at runtime by
+[integrations/config.ts](integrations/config.ts):
+
+- **Configured** — the feature works normally.
+- **Not configured** — the call fails immediately with `PRECONDITION_FAILED`
+  naming the missing variables, and the UI disables the control after reading
+  `system.getIntegrationStatus`. Nothing is written that cannot be completed.
+
+E-invoicing registers a confirmed invoice with the IRP and stores the returned
+IRN, acknowledgement and signed QR; the payload is built from the GST figures
+frozen at confirmation, so what is filed matches what was printed. E-way bills
+are raised against an existing IRN.
+
+Online payments create a hosted Razorpay link for the outstanding balance of a
+confirmed invoice. `POST /webhooks/razorpay` verifies the HMAC signature with a
+timing-safe comparison, then records the receipt, settles the invoice and posts
+to the ledger. Settlement is idempotent, so the retries gateways send cannot
+record the same money twice.
 
 ---
 
@@ -512,6 +450,13 @@ pnpm --filter @seed/database db:migrate
 # 3. Regenerate client
 pnpm --filter @seed/database db:generate
 ```
+
+- Commit the model change and its migration together. CI applies every migration to an empty Postgres and then runs
+  `db:drift`, which fails if the schema describes anything the migrations do not build.
+- Never edit a migration that has been applied anywhere. Add a new one.
+- Prisma has no down migrations. Take a backup before deploying to a database that holds real data.
+- `database/prisma.config.ts` loads `server/.env`, so a bare Prisma command targets your **dev** database. When you
+  mean a scratch database, set `DATABASE_URL` explicitly on the command.
 
 ### Adding New API Routes
 
@@ -547,6 +492,28 @@ import { productSchema } from '@seed/schemas';
 - Update `.env.example` when adding new variables
 - Use `process.env.VARIABLE` in server
 - Use `NEXT_PUBLIC_` prefix for client-side variables
+
+### Testing
+
+```bash
+pnpm test      # unit suites; the integration suites skip themselves without a database
+```
+
+The integration suites (`server/tests/integration/`) run the real tRPC procedures against a real Postgres and
+**create and delete rows**, so point them at a throwaway database, never your dev one. With Docker:
+
+```bash
+docker run --rm -d --name seed-test-db -p 55432:5432 \
+  -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=seed_test postgres:17-alpine
+export TEST_DATABASE_URL=postgresql://postgres@localhost:55432/seed_test
+DATABASE_URL=$TEST_DATABASE_URL pnpm --filter @seed/database db:deploy   # apply migrations once
+pnpm test
+```
+
+(PowerShell: `$env:TEST_DATABASE_URL = "..."`.) Without a Docker daemon, any local Postgres works the same way.
+The suites that matter most: `inventoryReconciliation` (the Inventory account must equal the stock subledger after
+every kind of movement), `fullJourney` and `ledgerPosting` (the books balance), `invoiceGst` (tax frozen at
+confirmation) and `stockConcurrency`.
 
 ### Testing Email Templates
 
@@ -644,7 +611,7 @@ ISC
 
 ### Database migration issues
 
-- Reset database (dev only): `pnpm --filter @seed/database db:migrate reset`
+- Reset database (**destroys all data**, scratch databases only): `DATABASE_URL=<scratch url> pnpm --filter @seed/database exec prisma migrate reset`
 - Check migration status: Check `database/migrations/`
 
 ### Type errors

@@ -1,3 +1,5 @@
+import type Decimal from 'decimal.js';
+
 export type AccountType = 'ASSET' | 'LIABILITY' | 'EQUITY' | 'INCOME' | 'EXPENSE';
 
 export type AccountSubType =
@@ -26,10 +28,16 @@ export type JournalSource =
   | 'DEPRECIATION_RUN'
   | 'MANUAL';
 
+/**
+ * Any value readable as a number. Accepting strings and Decimals lets Prisma
+ * `Decimal` columns pass through without a lossy trip via `Number()`.
+ */
+export type Numeric = number | string | Decimal;
+
 export type PostingLine = {
   accountCode: string;
-  debit: number;
-  credit: number;
+  debit: Numeric;
+  credit: Numeric;
   narration?: string;
   partyId?: string;
 };

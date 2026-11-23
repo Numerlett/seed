@@ -1,11 +1,12 @@
 # SEED Audit Log
 
-## Dependency Graph (verified)
+## Dependency Graph (re-verified 2026-11-23 by script over every package.json)
 
 ```
 web          → api, schemas
+mobile       → api, schemas (and server, type-only, as a devDependency)
 api          → server (type-only import for AppRouter via devDependency)
-server       → database, schemas, jobs, tax, accounting
+server       → accounting, database, integrations, jobs, pdf, schemas, tax
 database     → (nothing internal)
 schemas      → (nothing internal)
 jobs         → database
@@ -134,3 +135,44 @@ Run with: `cd web && pnpm test:e2e`
 ---
 
 ## Total: 88 unit tests, 0 failures
+
+(Historical: the totals above are from that pass. Current figures are in the next section.)
+
+---
+
+## 2026-11-23 — Pre-handover pass
+
+Everything here was verified by running it, against Postgres 17.
+
+### State
+- `pnpm build`, `pnpm lint` (tsc on every package, ESLint on web with no warnings) and `pnpm test` pass: **28 test files, 287 tests**, including the 9 integration suites that run the real tRPC procedures against a database.
+- All 10 migrations apply to an empty database and the Prisma schema matches what they build (`db:drift`, now enforced in CI). The drift check was also run against a deliberately altered database and failed as intended.
+- Dependency graph above re-checked; no runtime cycles.
+
+### [accounting] — `server/controllers/returns.ts`: purchase returns left Inventory overstated
+**Issue:** `confirmPurchaseReturn` posted only the supplier leg (Dr Payables, Cr GR/IR, Cr Input GST). The stock subledger dropped but the Inventory account kept carrying the goods, and GR/IR was left with an unmatched credit.
+**Fix:** added `purchaseReturnStockPosting` (Dr GR/IR, Cr Inventory) and post it in the same entry.
+**Status:** Fixed ✓ — `server/tests/integration/inventoryReconciliation.test.ts`
+
+### [accounting] — `server/controllers/stockops.ts`: stock adjustments and damage reports never posted
+**Issue:** the `STOCK_ADJUSTMENT` and `DAMAGE_REPORT` journal sources, the Stock Loss account (5200) and `stockWriteOffPosting` all existed, and nothing called them. Write-offs reduced stock and left the balance sheet unchanged.
+**Fix:** adjustments post a loss (Dr Stock Loss, Cr Inventory) or a gain (Dr Inventory, Cr Stock Loss, new `stockGainPosting`); damage reports post a write-off. Transfers correctly post nothing.
+**Status:** Fixed ✓ — `inventoryReconciliation.test.ts`, `accounting/tests/postings.test.ts`
+
+### [ci] — `.github/workflows/ci.yml`: migrations were never applied before the integration suites
+**Issue:** CI started an empty Postgres and ran `pnpm test`, so the integration suites would have met a database with no tables. CI had never run on this work.
+**Fix:** CI runs `db:deploy` and the new `db:drift` script before the tests.
+**Status:** Fixed ✓ (first CI run is the PR)
+
+### [docs] — setup instructions would not have produced a booting server
+**Issue:** README asked for Node 20 / pnpm 8 (the repo needs 24 / 11) and listed environment variables that do not exist; `server/.env.example` defaulted to `DEPLOYMENT_MODE=long-running`, which refuses to boot, and omitted every GSP, Razorpay, SMS and WhatsApp variable; the project tree omitted five packages.
+**Fix:** rewritten from the code; `docs/HANDOVER.md` added; `docs/MOBILE.md` and `docs/INVENTORY_MODULE.md` renamed to match the other docs.
+**Status:** Fixed ✓
+
+### [lint] — communications template pages
+**Issue:** `form.watch()` cannot be memoised, so the React Compiler skipped both pages.
+**Fix:** `useWatch`.
+**Status:** Fixed ✓
+
+### Known and not fixed
+See [docs/HANDOVER.md](docs/HANDOVER.md#known-gaps-and-risks).

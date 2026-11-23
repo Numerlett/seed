@@ -98,6 +98,7 @@ model JournalEntry {
 enum JournalSource {
   SALE_INVOICE
   SALE_RETURN
+  PURCHASE_ORDER
   GRN
   PURCHASE_RETURN
   PAYMENT_RECEIVED

@@ -17,6 +17,7 @@ import { salesRoutes } from './sales';
 import { returnsRoutes } from './returns';
 import { stockopsRoutes } from './stockops';
 import { adminRoutes } from './admin';
+import { systemRoutes } from './system';
 import { taxRoutes } from '../modules/tax/routers';
 import { accountingRoutes } from '../modules/accounting/routers';
 import { paymentsRoutes } from '../modules/payments/routers';
@@ -41,6 +42,7 @@ export const appRouter = t.router({
   returns: returnsRoutes,
   stockops: stockopsRoutes,
   admin: adminRoutes,
+  system: systemRoutes,
   tax: taxRoutes,
   accounting: accountingRoutes,
   payments: paymentsRoutes,

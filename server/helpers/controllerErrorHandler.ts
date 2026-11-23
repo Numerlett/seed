@@ -1,6 +1,10 @@
 import { TRPCError } from '@trpc/server';
 import { handlePrismaError } from './handlePrismaError';
 import { logger } from './logger';
+import {
+  IntegrationNotConfiguredError,
+  ServerlessUnavailableError,
+} from '../lib/dispatch/errors';
 
 /**
  * Context information for error handling
@@ -48,6 +52,36 @@ export function handleControllerError(
     // Log for debugging but don't modify the error
     logError(error, context);
     throw error;
+  }
+
+  // A missing integration is a deployment configuration problem, not a bug and
+  // not the caller's fault. PRECONDITION_FAILED lets the UI tell the user the
+  // feature is not set up instead of showing a generic server error.
+  if (error instanceof IntegrationNotConfiguredError) {
+    const trpcError = new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: error.message,
+      cause: error,
+    });
+    logger.warn(
+      {
+        operation: context.operation,
+        integration: error.integration,
+        missing: error.missing,
+      },
+      `Blocked: ${context.operation} needs an unconfigured integration`,
+    );
+    throw trpcError;
+  }
+
+  if (error instanceof ServerlessUnavailableError) {
+    const trpcError = new TRPCError({
+      code: 'NOT_IMPLEMENTED',
+      message: error.message,
+      cause: error,
+    });
+    logError(trpcError, context);
+    throw trpcError;
   }
 
   // Handle Prisma errors with enhanced error information

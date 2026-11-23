@@ -28,8 +28,14 @@ The backend runs in one of two modes selected by the `DEPLOYMENT_MODE` env var:
 
 | Mode | Use when | Requires Redis? | Worker process? | Scheduled jobs? |
 |---|---|---|---|---|
-| `long-running` (default) | Production with workers, dev with full feature parity, container hosts (Fly, Railway, Render, ECS) | **Yes** — `REDIS_URL` required | Yes — deploy `@seed/jobs` separately | Yes |
+| `long-running` (schema default) | Production with workers, dev with full feature parity, container hosts (Fly, Railway, Render, ECS) | **Yes** — `REDIS_URL` required | Yes — deploy `@seed/jobs` separately | Yes |
 | `serverless` | Pre-revenue / cheap deploys on Vercel, Lambda, Cloud Run scale-to-zero | No | No | **Disabled** — features that require schedulers throw `NOT_IMPLEMENTED` |
+
+> **`long-running` currently refuses to boot.** `jobs/queues.ts` defines nine
+> queues and no `Worker` consumes any of them, so queued email, SMS, PDFs and
+> e-invoices would be accepted and silently never run. `server/index.ts` exits
+> with an explanatory error instead. **Deploy in `serverless` mode** (which is
+> what `fly.toml` sets) until a worker process exists, then remove the guard.
 
 ### How features behave per mode
 
@@ -50,7 +56,7 @@ Callers in `server/` should import from `server/lib/dispatch` rather than callin
 
 ### Switching modes
 
-The default is `long-running`, so existing deployments behave the same as before. To deploy in serverless mode:
+`long-running` is the schema default but is currently guarded (see above), so deployments must set `serverless` explicitly. To deploy in serverless mode:
 
 1. Set `DEPLOYMENT_MODE=serverless` in the deploy environment.
 2. Omit `REDIS_URL` (or leave it — it's ignored).
@@ -75,7 +81,9 @@ User Browser
   └── Google OAuth redirect → backend /api/auth.googleCallback
 ```
 
-The Docker image is built from `Dockerfile.server` at the repo root. It is a multi-stage build that compiles all seven workspace packages (`database`, `schemas`, `integrations`, `jobs`, `tax`, `accounting`, `pdf`) before assembling the production runner. Migrations are applied automatically on container start via `prisma migrate deploy`.
+The Docker image is built from `Dockerfile.server` at the repo root. It is a multi-stage build that compiles all seven workspace packages (`database`, `schemas`, `integrations`, `jobs`, `tax`, `accounting`, `pdf`) before assembling the production runner.
+
+Migrations do **not** run on container start. They run once per deploy through Fly's `release_command` (see `fly.toml`), so a scale-from-zero cold start does not pay migration latency and simultaneous machine starts do not contend on the migration advisory lock. On other hosts, run `pnpm --filter @seed/database db:deploy` as a release/pre-deploy step.
 
 ---
 
@@ -136,6 +144,63 @@ AWS_S3_BUCKET_NAME=<bucket name>
 # TEST_OTP=
 ```
 
+### Optional integrations
+
+These are all optional. A deployment without them still boots; the features that
+depend on them refuse with `PRECONDITION_FAILED` and a message naming what is
+missing, and `system.getIntegrationStatus` reports them as unconfigured so the
+UI can disable the controls. Nothing is written to the database for an
+integration that cannot complete.
+
+```env
+# Email provider — defaults to smtp using the SMTP_* block above
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=<from Resend>
+RESEND_MAIL=noreply@yourdomain.com
+
+# SMS — msg91 (default) or twilio
+SMS_PROVIDER=msg91
+MSG91_AUTH_KEY=<key>
+MSG91_SENDER_ID=<6-char sender id>
+
+# WhatsApp — twilio (default) or gupshup
+WHATSAPP_PROVIDER=twilio
+TWILIO_ACCOUNT_SID=<sid>
+TWILIO_AUTH_TOKEN=<token>
+WHATSAPP_FROM=whatsapp:+14155238886
+
+# E-invoicing via a GST Suvidha Provider.
+# GSP_BASE_URL defaults to the NIC sandbox; the rest have no safe default.
+GSP_BASE_URL=https://einv-apisandbox.nic.in
+GSP_CLIENT_ID=<from your GSP>
+GSP_CLIENT_SECRET=<from your GSP>
+GSP_USERNAME=<IRP username>
+GSP_PASSWORD=<IRP password>
+GSP_GSTIN=<15-char GSTIN registered with the IRP>
+
+# Online payments
+RAZORPAY_KEY_ID=<key id>
+RAZORPAY_KEY_SECRET=<key secret>
+RAZORPAY_WEBHOOK_SECRET=<webhook signing secret>
+```
+
+**The webhook secret is not optional once Razorpay keys are set.** The server
+refuses to boot with keys but no `RAZORPAY_WEBHOOK_SECRET`: payment links would
+go out, customers would pay, and no confirmation could be verified — so nothing
+would ever be recorded against the invoice.
+
+After enabling Razorpay, register `https://<your-api-host>/webhooks/razorpay` in
+the Razorpay dashboard for the `payment_link.paid` event.
+
+### Graceful shutdown
+
+The server handles `SIGTERM` and `SIGINT`: it stops accepting connections, lets
+in-flight requests finish, disconnects Prisma, and exits — with a 10-second
+hard deadline in case a request hangs. Platforms that replace machines on
+deploy (Fly, ECS, Railway) send `SIGTERM` first, and without this a request
+that had written an invoice but not yet its journal entry could be cut in half.
+Give the platform at least 15 seconds of shutdown grace.
+
 ### Frontend (Web)
 
 ```env
@@ -177,7 +242,11 @@ docker push ACCOUNT.dkr.ecr.ap-south-1.amazonaws.com/seed-server:v1.0.0
 
 ### 3. Run the container
 
-The container automatically runs `prisma migrate deploy` before starting the server.
+The container starts the server directly. Apply migrations first, as a release step:
+
+```bash
+docker run --rm --env-file server/.env seed-server:latest \n  pnpm --filter @seed/database db:deploy
+```
 
 ```bash
 docker run -d \
@@ -281,7 +350,22 @@ gcloud run deploy seed-server \
 
 ## CI/CD Pipeline
 
-### GitHub Actions — `.github/workflows/deploy.yml`
+### Continuous integration — `.github/workflows/ci.yml`
+
+This one exists in the repo. It runs on every push to `main` and every pull
+request: install with a frozen lockfile, `pnpm build` (which generates the
+Prisma client the typecheck depends on), `pnpm lint`, then `pnpm test`. A
+Postgres 17 service container is attached so the integration suite under
+`server/tests/integration/` runs rather than skipping.
+
+Node is pinned to 24 to match `Dockerfile.server` and the `engines` floor —
+Prisma does not support Node 25.
+
+### Deployment — `.github/workflows/deploy.yml`
+
+The workflow below is a **template**, not a file in this repo. Production
+currently deploys through `fly deploy` using `fly.toml`, which runs migrations
+in its `release_command`.
 
 ```yaml
 name: Deploy
@@ -377,12 +461,29 @@ jobs:
 
 ### Run migrations
 
-Migrations run automatically on container start. To run them manually:
+Migrations run as a release step, not on container start. To run them manually:
 
 ```bash
 # Against a remote DB
 DATABASE_URL="postgresql://..." pnpm --filter @seed/database db:deploy
 ```
+
+### Before the next deploy: the 2026 hardening migrations
+
+`main` contains only the `init` migration; this branch adds nine more (`20260822090000` through `20260905090000`). On Fly they run automatically as the `release_command` of the next deploy, so first:
+
+1. **See what is pending** on the target database: `DATABASE_URL="postgresql://..." pnpm --filter @seed/database exec prisma migrate status`.
+2. **Back up** (see Backups below). Prisma has no down migrations.
+3. **Check what the last migration will touch.** `payment_allocation_foreign_keys` sets `invoiceId` / `billId` to NULL on any payment allocation whose document no longer exists, so that it can add foreign keys. Count them first:
+
+   ```sql
+   SELECT count(*) FROM payment_allocations pa
+   WHERE (pa."invoiceId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sale_invoices si WHERE si.id = pa."invoiceId"))
+      OR (pa."billId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM purchase_orders po WHERE po.id = pa."billId"));
+   ```
+
+4. `costing_weighted_average_only` rebuilds the `CostingMethod` enum and briefly locks `businesses`. Any business set to FIFO becomes weighted average, which is what its books already used.
+5. **After deploying**, run the reconciliation query in [HANDOVER.md](HANDOVER.md#reconcile-historical-books). Purchase returns, stock adjustments and damage reports confirmed before the posting fixes never reached the Inventory account.
 
 ### Rollback a migration
 

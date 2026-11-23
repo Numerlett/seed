@@ -1,4 +1,4 @@
-import { prisma } from '@seed/database';
+import { Prisma, prisma } from '@seed/database';
 import { businessMemberProcedure } from '../trpc/procedures';
 import * as z from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -8,35 +8,19 @@ import {
   grnSchema,
 } from '@seed/schemas';
 import { handleControllerError } from '../helpers/controllerErrorHandler';
-import {
-  generateDocumentNumber,
-  DOC_PREFIXES,
-} from '../helpers/documentNumber';
+import { withDocumentNumber, DOC_PREFIXES } from '../helpers/documentNumber';
 import { createLedgerEntry } from '../helpers/inventoryLedger';
+import {
+  computePurchaseTax,
+  documentTaxColumns,
+  lineTaxColumns,
+} from '../lib/tax';
+import { postJournalEntry, reverseJournalEntry } from '../lib/accounting/post';
+import { grnPosting, supplierInvoicePosting } from '@seed/accounting';
 
 // =====================================================
 // PURCHASE ORDER CONTROLLERS
 // =====================================================
-
-/**
- * Helper: compute line-item total from quantity, unitPrice, taxRate, discount.
- */
-function computeItemTotal(
-  quantity: number,
-  unitPrice: number,
-  taxRate: number,
-  discount: number,
-) {
-  const subtotal = quantity * unitPrice;
-  const discountAmt = subtotal * (discount / 100);
-  const afterDiscount = subtotal - discountAmt;
-  const taxAmt = afterDiscount * (taxRate / 100);
-  return {
-    totalPrice: afterDiscount + taxAmt,
-    taxAmt,
-    discountAmt,
-  };
-}
 
 /**
  * Create a new Purchase Order (DRAFT).
@@ -45,64 +29,50 @@ export const createPurchaseOrder = businessMemberProcedure
   .input(purchaseOrderSchema)
   .mutation(async ({ input, ctx }) => {
     try {
-      const documentNumber = await generateDocumentNumber(
+      const tax = await computePurchaseTax(prisma, input.businessId, {
+        supplierId: input.supplierId,
+        items: input.items,
+      });
+      const lineTax = lineTaxColumns(tax);
+
+      const itemsData = input.items.map((item, index) => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        taxRate: item.taxRate ?? 0,
+        discount: item.discount ?? 0,
+        cessRate: item.cessRate ?? 0,
+        ...lineTax[index],
+      }));
+
+      const po = await withDocumentNumber(
         input.businessId,
         DOC_PREFIXES.PURCHASE_ORDER,
         input.documentNumber,
-      );
-
-      let totalAmount = 0;
-      let taxAmount = 0;
-      let discountAmount = 0;
-
-      const itemsData = input.items.map((item) => {
-        const computed = computeItemTotal(
-          item.quantity,
-          item.unitPrice,
-          item.taxRate ?? 0,
-          item.discount ?? 0,
-        );
-        totalAmount += item.quantity * item.unitPrice;
-        taxAmount += computed.taxAmt;
-        discountAmount += computed.discountAmt;
-
-        return {
-          productId: item.productId,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          taxRate: item.taxRate ?? 0,
-          discount: item.discount ?? 0,
-          totalPrice: computed.totalPrice,
-        };
-      });
-
-      const grandTotal = totalAmount - discountAmount + taxAmount;
-
-      const po = await prisma.purchaseOrder.create({
-        data: {
-          documentNumber,
-          orderDate: input.orderDate ?? new Date(),
-          expectedDate: input.expectedDate,
-          notes: input.notes,
-          totalAmount,
-          taxAmount,
-          discountAmount,
-          grandTotal,
-          supplierId: input.supplierId,
-          businessId: input.businessId,
-          items: {
-            create: itemsData,
-          },
-        },
-        include: {
-          items: {
-            include: {
-              product: { select: { id: true, name: true, sku: true } },
+        (documentNumber) =>
+          prisma.purchaseOrder.create({
+            data: {
+              documentNumber,
+              orderDate: input.orderDate ?? new Date(),
+              expectedDate: input.expectedDate,
+              notes: input.notes,
+              supplierId: input.supplierId,
+              businessId: input.businessId,
+              items: {
+                create: itemsData,
+              },
+              ...documentTaxColumns(tax),
             },
-          },
-          supplier: { select: { id: true, name: true } },
-        },
-      });
+            include: {
+              items: {
+                include: {
+                  product: { select: { id: true, name: true, sku: true } },
+                },
+              },
+              supplier: { select: { id: true, name: true } },
+            },
+          }),
+      );
 
       return po;
     } catch (error: unknown) {
@@ -264,35 +234,23 @@ export const updatePurchaseOrder = businessMemberProcedure
 
       // If items are being updated, recalculate totals
       if (input.data.items) {
-        let totalAmount = 0;
-        let taxAmount = 0;
-        let discountAmount = 0;
-
-        const itemsData = input.data.items.map((item) => {
-          const computed = computeItemTotal(
-            item.quantity,
-            item.unitPrice,
-            item.taxRate ?? 0,
-            item.discount ?? 0,
-          );
-          totalAmount += item.quantity * item.unitPrice;
-          taxAmount += computed.taxAmt;
-          discountAmount += computed.discountAmt;
-
-          return {
-            productId: item.productId,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            taxRate: item.taxRate ?? 0,
-            discount: item.discount ?? 0,
-            totalPrice: computed.totalPrice,
-          };
+        const tax = await computePurchaseTax(prisma, input.businessId, {
+          supplierId: input.data.supplierId ?? existing.supplierId,
+          items: input.data.items,
         });
+        const lineTax = lineTaxColumns(tax);
 
-        updateData.totalAmount = totalAmount;
-        updateData.taxAmount = taxAmount;
-        updateData.discountAmount = discountAmount;
-        updateData.grandTotal = totalAmount - discountAmount + taxAmount;
+        const itemsData = input.data.items.map((item, index) => ({
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          taxRate: item.taxRate ?? 0,
+          discount: item.discount ?? 0,
+          cessRate: item.cessRate ?? 0,
+          ...lineTax[index],
+        }));
+
+        Object.assign(updateData, documentTaxColumns(tax));
 
         // Delete old items and create new ones
         delete updateData.items;
@@ -351,6 +309,7 @@ export const confirmPurchaseOrder = businessMemberProcedure
     try {
       const po = await prisma.purchaseOrder.findFirst({
         where: { id: input.id, businessId: input.businessId },
+        include: { items: true },
       });
 
       if (!po) {
@@ -367,9 +326,46 @@ export const confirmPurchaseOrder = businessMemberProcedure
         });
       }
 
-      const confirmed = await prisma.purchaseOrder.update({
-        where: { id: input.id },
-        data: { status: 'CONFIRMED' },
+      const confirmed = await prisma.$transaction(async (tx) => {
+        // Freeze the GST breakup at confirmation — this is the figure the
+        // GSTR-3B input tax credit is aggregated from.
+        const tax = await computePurchaseTax(tx, input.businessId, {
+          supplierId: po.supplierId,
+          items: po.items,
+        });
+        const lineTax = lineTaxColumns(tax);
+
+        for (const [index, item] of po.items.entries()) {
+          await tx.purchaseOrderItem.update({
+            where: { id: item.id },
+            data: lineTax[index],
+          });
+        }
+
+        await postJournalEntry(tx, {
+          businessId: input.businessId,
+          source: 'PURCHASE_ORDER',
+          sourceId: po.id,
+          date: po.orderDate,
+          narration: `Purchase Order ${po.documentNumber}`,
+          postedBy: ctx.userId,
+          lines: supplierInvoicePosting({
+            partyId: po.supplierId,
+            taxableAmount: tax.totalTaxable.toFixed(2),
+            tax: {
+              cgst: tax.totalCgst.toFixed(2),
+              sgst: tax.totalSgst.toFixed(2),
+              igst: tax.totalIgst.toFixed(2),
+              cess: tax.totalCess.toFixed(2),
+            },
+            grandTotal: tax.grandTotal.toFixed(2),
+          }),
+        });
+
+        return tx.purchaseOrder.update({
+          where: { id: input.id },
+          data: { status: 'CONFIRMED', ...documentTaxColumns(tax) },
+        });
       });
 
       return confirmed;
@@ -419,6 +415,20 @@ export const cancelPurchaseOrder = businessMemberProcedure
         }
       }
 
+      // A confirmed PO carries a journal entry. Cancelling reverses it rather
+      // than deleting it, so the audit trail keeps both sides of the story.
+      if (po.status === 'CONFIRMED') {
+        await prisma.$transaction(async (tx) => {
+          await reverseJournalEntry(tx, {
+            businessId: input.businessId,
+            source: 'PURCHASE_ORDER',
+            sourceId: po.id,
+            date: new Date(),
+            narration: `Reversal of Purchase Order ${po.documentNumber}`,
+          });
+        });
+      }
+
       const cancelled = await prisma.purchaseOrder.update({
         where: { id: input.id },
         data: { status: 'CANCELLED' },
@@ -458,7 +468,15 @@ export const deletePurchaseOrder = businessMemberProcedure
         });
       }
 
-      await prisma.purchaseOrder.delete({ where: { id: input.id } });
+      const removed = await prisma.purchaseOrder.deleteMany({
+        where: { id: input.id, businessId: input.businessId },
+      });
+      if (removed.count === 0) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Purchase order not found',
+        });
+      }
       return { success: true };
     } catch (error: unknown) {
       handleControllerError(error, {
@@ -479,12 +497,6 @@ export const createGRN = businessMemberProcedure
   .input(grnSchema)
   .mutation(async ({ input, ctx }) => {
     try {
-      const documentNumber = await generateDocumentNumber(
-        input.businessId,
-        DOC_PREFIXES.GRN,
-        input.documentNumber,
-      );
-
       const itemsData = input.items.map((item) => ({
         productId: item.productId,
         quantityOrdered: item.quantityOrdered,
@@ -495,29 +507,35 @@ export const createGRN = businessMemberProcedure
         batchId: item.batchId,
       }));
 
-      const grn = await prisma.goodsReceiptNote.create({
-        data: {
-          documentNumber,
-          receivedDate: input.receivedDate ?? new Date(),
-          notes: input.notes,
-          purchaseOrderId: input.purchaseOrderId,
-          supplierId: input.supplierId,
-          warehouseId: input.warehouseId,
-          businessId: input.businessId,
-          items: { create: itemsData },
-        },
-        include: {
-          items: {
-            include: {
-              product: { select: { id: true, name: true, sku: true } },
-              shelf: { select: { id: true, shelfCode: true } },
-              batch: { select: { id: true, batchNumber: true } },
+      const grn = await withDocumentNumber(
+        input.businessId,
+        DOC_PREFIXES.GRN,
+        input.documentNumber,
+        (documentNumber) =>
+          prisma.goodsReceiptNote.create({
+            data: {
+              documentNumber,
+              receivedDate: input.receivedDate ?? new Date(),
+              notes: input.notes,
+              purchaseOrderId: input.purchaseOrderId,
+              supplierId: input.supplierId,
+              warehouseId: input.warehouseId,
+              businessId: input.businessId,
+              items: { create: itemsData },
             },
-          },
-          supplier: { select: { id: true, name: true } },
-          warehouse: { select: { id: true, name: true } },
-        },
-      });
+            include: {
+              items: {
+                include: {
+                  product: { select: { id: true, name: true, sku: true } },
+                  shelf: { select: { id: true, shelfCode: true } },
+                  batch: { select: { id: true, batchNumber: true } },
+                },
+              },
+              supplier: { select: { id: true, name: true } },
+              warehouse: { select: { id: true, name: true } },
+            },
+          }),
+      );
 
       return grn;
     } catch (error: unknown) {
@@ -741,6 +759,32 @@ export const confirmGRN = businessMemberProcedure
           });
         }
 
+        // Receipt books inventory against GR/IR clearing. GST is not booked
+        // here — it enters at purchase order confirmation, which is where the
+        // tax breakup lives; GRN lines carry none.
+        const inventoryValue = grn.items
+          .reduce(
+            (sum, item) =>
+              sum.plus(new Prisma.Decimal(item.totalPrice.toString())),
+            new Prisma.Decimal(0),
+          )
+          .toFixed(2);
+
+        await postJournalEntry(tx, {
+          businessId: input.businessId,
+          source: 'GRN',
+          sourceId: grn.id,
+          date: grn.receivedDate,
+          narration: `Goods Receipt ${grn.documentNumber}`,
+          postedBy: ctx.userId,
+          lines: grnPosting({
+            partyId: grn.supplierId,
+            inventoryValue,
+            tax: { cgst: 0, sgst: 0, igst: 0, cess: 0 },
+            grandTotal: inventoryValue,
+          }),
+        });
+
         // Update GRN status
         return tx.goodsReceiptNote.update({
           where: { id: input.id },
@@ -825,7 +869,12 @@ export const deleteGRN = businessMemberProcedure
         });
       }
 
-      await prisma.goodsReceiptNote.delete({ where: { id: input.id } });
+      const removed = await prisma.goodsReceiptNote.deleteMany({
+        where: { id: input.id, businessId: input.businessId },
+      });
+      if (removed.count === 0) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'GRN not found' });
+      }
       return { success: true };
     } catch (error: unknown) {
       handleControllerError(error, {

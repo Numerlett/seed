@@ -1,3 +1,5 @@
+import { assertIntegrationConfigured } from './errors';
+
 export type SendWhatsAppInput = {
   to: string;
   message: string;
@@ -11,6 +13,8 @@ export type SendWhatsAppInput = {
  * - Long-running: enqueues to BullMQ; the whatsapp worker delivers it.
  */
 export async function sendWhatsApp(input: SendWhatsAppInput): Promise<void> {
+  await assertIntegrationConfigured('whatsapp');
+
   if (process.env.DEPLOYMENT_MODE === 'serverless') {
     const { sendWhatsApp: sendWhatsAppDirect } = await import(
       '@seed/integrations'

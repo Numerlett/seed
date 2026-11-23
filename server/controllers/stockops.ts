@@ -9,15 +9,16 @@ import {
   damageReportSchema,
 } from '@seed/schemas';
 import { handleControllerError } from '../helpers/controllerErrorHandler';
-import {
-  generateDocumentNumber,
-  DOC_PREFIXES,
-} from '../helpers/documentNumber';
+import { withDocumentNumber, DOC_PREFIXES } from '../helpers/documentNumber';
 import {
   createLedgerEntry,
+  lockProductsForUpdate,
+  resolveOutboundCost,
   validateStockAvailability,
   getStockQuantity,
 } from '../helpers/inventoryLedger';
+import { postJournalEntry } from '../lib/accounting/post';
+import { stockGainPosting, stockWriteOffPosting } from '@seed/accounting';
 
 // =====================================================
 // STOCK ADJUSTMENT CONTROLLERS
@@ -31,12 +32,6 @@ export const createStockAdjustment = businessMemberProcedure
   .input(stockAdjustmentSchema)
   .mutation(async ({ input, ctx }) => {
     try {
-      const documentNumber = await generateDocumentNumber(
-        input.businessId,
-        DOC_PREFIXES.STOCK_ADJUSTMENT,
-        input.documentNumber,
-      );
-
       const itemsData = input.items.map((item) => ({
         productId: item.productId,
         systemQuantity: item.systemQuantity,
@@ -47,25 +42,31 @@ export const createStockAdjustment = businessMemberProcedure
         batchId: item.batchId,
       }));
 
-      const adj = await prisma.stockAdjustment.create({
-        data: {
-          documentNumber,
-          adjustmentDate: input.adjustmentDate ?? new Date(),
-          reason: input.reason,
-          notes: input.notes,
-          warehouseId: input.warehouseId,
-          businessId: input.businessId,
-          items: { create: itemsData },
-        },
-        include: {
-          items: {
-            include: {
-              product: { select: { id: true, name: true, sku: true } },
+      const adj = await withDocumentNumber(
+        input.businessId,
+        DOC_PREFIXES.STOCK_ADJUSTMENT,
+        input.documentNumber,
+        (documentNumber) =>
+          prisma.stockAdjustment.create({
+            data: {
+              documentNumber,
+              adjustmentDate: input.adjustmentDate ?? new Date(),
+              reason: input.reason,
+              notes: input.notes,
+              warehouseId: input.warehouseId,
+              businessId: input.businessId,
+              items: { create: itemsData },
             },
-          },
-          warehouse: { select: { id: true, name: true } },
-        },
-      });
+            include: {
+              items: {
+                include: {
+                  product: { select: { id: true, name: true, sku: true } },
+                },
+              },
+              warehouse: { select: { id: true, name: true } },
+            },
+          }),
+      );
 
       return adj;
     } catch (error: unknown) {
@@ -207,6 +208,16 @@ export const confirmStockAdjustment = businessMemberProcedure
       }
 
       const confirmed = await prisma.$transaction(async (tx) => {
+        await lockProductsForUpdate(
+          tx,
+          adj.items.map((item) => item.productId),
+        );
+
+        // Value gained and lost by the count, kept apart so the books show a
+        // surplus and a shortfall on the same document as what they are.
+        let valueIn = new Prisma.Decimal(0);
+        let valueOut = new Prisma.Decimal(0);
+
         for (const item of adj.items) {
           const adjustQty = new Prisma.Decimal(item.adjustQuantity.toString());
 
@@ -214,6 +225,9 @@ export const confirmStockAdjustment = businessMemberProcedure
 
           if (adjustQty.gt(0)) {
             // Stock increase
+            valueIn = valueIn.plus(
+              adjustQty.mul(new Prisma.Decimal(item.unitCost.toString())),
+            );
             await createLedgerEntry(tx, {
               transactionType: 'ADJUSTMENT_IN',
               productId: item.productId,
@@ -240,6 +254,17 @@ export const confirmStockAdjustment = businessMemberProcedure
               productName: item.product.name,
             });
 
+            // Stock leaves at the value it is carried at, not at a figure
+            // typed on the document. Writing off 5 units cannot be allowed to
+            // remove a different amount of value than those 5 units represent.
+            const unitCost = await resolveOutboundCost(tx, {
+              productId: item.productId,
+              warehouseId: adj.warehouseId,
+              shelfId: item.shelfId,
+              batchId: item.batchId,
+            });
+
+            valueOut = valueOut.plus(absQty.mul(unitCost));
             await createLedgerEntry(tx, {
               transactionType: 'ADJUSTMENT_OUT',
               productId: item.productId,
@@ -248,7 +273,7 @@ export const confirmStockAdjustment = businessMemberProcedure
               batchId: item.batchId,
               businessId: input.businessId,
               quantity: absQty,
-              unitCost: item.unitCost,
+              unitCost,
               referenceTable: 'stock_adjustments',
               referenceId: adj.id,
               transactionDate: adj.adjustmentDate,
@@ -256,6 +281,22 @@ export const confirmStockAdjustment = businessMemberProcedure
             });
           }
         }
+
+        // The stock subledger has moved, so the Inventory account must too.
+        // A shortfall is a loss; a surplus is a gain booked against the same
+        // account. Zero legs are dropped by postJournalEntry.
+        await postJournalEntry(tx, {
+          businessId: input.businessId,
+          source: 'STOCK_ADJUSTMENT',
+          sourceId: adj.id,
+          date: adj.adjustmentDate,
+          narration: `Stock Adjustment ${adj.documentNumber}`,
+          postedBy: ctx.userId,
+          lines: [
+            ...stockGainPosting({ amount: valueIn.toFixed(2) }),
+            ...stockWriteOffPosting({ amount: valueOut.toFixed(2) }),
+          ],
+        });
 
         return tx.stockAdjustment.update({
           where: { id: input.id },
@@ -338,12 +379,6 @@ export const createStockTransfer = businessMemberProcedure
         });
       }
 
-      const documentNumber = await generateDocumentNumber(
-        input.businessId,
-        DOC_PREFIXES.STOCK_TRANSFER,
-        input.documentNumber,
-      );
-
       const itemsData = input.items.map((item) => ({
         productId: item.productId,
         quantity: item.quantity,
@@ -351,28 +386,34 @@ export const createStockTransfer = businessMemberProcedure
         batchId: item.batchId,
       }));
 
-      const transfer = await prisma.stockTransfer.create({
-        data: {
-          documentNumber,
-          transferDate: input.transferDate ?? new Date(),
-          notes: input.notes,
-          sourceWarehouseId: input.sourceWarehouseId,
-          sourceShelfId: input.sourceShelfId,
-          destWarehouseId: input.destWarehouseId,
-          destShelfId: input.destShelfId,
-          businessId: input.businessId,
-          items: { create: itemsData },
-        },
-        include: {
-          items: {
-            include: {
-              product: { select: { id: true, name: true, sku: true } },
+      const transfer = await withDocumentNumber(
+        input.businessId,
+        DOC_PREFIXES.STOCK_TRANSFER,
+        input.documentNumber,
+        (documentNumber) =>
+          prisma.stockTransfer.create({
+            data: {
+              documentNumber,
+              transferDate: input.transferDate ?? new Date(),
+              notes: input.notes,
+              sourceWarehouseId: input.sourceWarehouseId,
+              sourceShelfId: input.sourceShelfId,
+              destWarehouseId: input.destWarehouseId,
+              destShelfId: input.destShelfId,
+              businessId: input.businessId,
+              items: { create: itemsData },
             },
-          },
-          sourceWarehouse: { select: { id: true, name: true } },
-          destWarehouse: { select: { id: true, name: true } },
-        },
-      });
+            include: {
+              items: {
+                include: {
+                  product: { select: { id: true, name: true, sku: true } },
+                },
+              },
+              sourceWarehouse: { select: { id: true, name: true } },
+              destWarehouse: { select: { id: true, name: true } },
+            },
+          }),
+      );
 
       return transfer;
     } catch (error: unknown) {
@@ -522,6 +563,11 @@ export const confirmStockTransfer = businessMemberProcedure
       }
 
       const confirmed = await prisma.$transaction(async (tx) => {
+        await lockProductsForUpdate(
+          tx,
+          transfer.items.map((item) => item.productId),
+        );
+
         for (const item of transfer.items) {
           // Validate source stock
           await validateStockAvailability(tx, {
@@ -533,6 +579,19 @@ export const confirmStockTransfer = businessMemberProcedure
             productName: item.product.name,
           });
 
+          // A transfer moves value, it does not create or destroy any. Both
+          // legs use the cost the source location carries, so the total value
+          // of inventory is identical before and after — with a figure typed
+          // on the document, moving stock silently revalued it. For the same
+          // reason a transfer posts nothing to the journal: Inventory is one
+          // account for the whole business, and it does not change.
+          const unitCost = await resolveOutboundCost(tx, {
+            productId: item.productId,
+            warehouseId: transfer.sourceWarehouseId,
+            shelfId: transfer.sourceShelfId,
+            batchId: item.batchId,
+          });
+
           // TRANSFER_OUT from source
           await createLedgerEntry(tx, {
             transactionType: 'TRANSFER_OUT',
@@ -542,7 +601,7 @@ export const confirmStockTransfer = businessMemberProcedure
             batchId: item.batchId,
             businessId: input.businessId,
             quantity: item.quantity,
-            unitCost: item.unitCost,
+            unitCost,
             referenceTable: 'stock_transfers',
             referenceId: transfer.id,
             transactionDate: transfer.transferDate,
@@ -558,7 +617,7 @@ export const confirmStockTransfer = businessMemberProcedure
             batchId: item.batchId,
             businessId: input.businessId,
             quantity: item.quantity,
-            unitCost: item.unitCost,
+            unitCost,
             referenceTable: 'stock_transfers',
             referenceId: transfer.id,
             transactionDate: transfer.transferDate,
@@ -638,12 +697,6 @@ export const createDamageReport = businessMemberProcedure
   .input(damageReportSchema)
   .mutation(async ({ input, ctx }) => {
     try {
-      const documentNumber = await generateDocumentNumber(
-        input.businessId,
-        DOC_PREFIXES.DAMAGE_REPORT,
-        input.documentNumber,
-      );
-
       const itemsData = input.items.map((item) => ({
         productId: item.productId,
         quantity: item.quantity,
@@ -654,25 +707,31 @@ export const createDamageReport = businessMemberProcedure
         batchId: item.batchId,
       }));
 
-      const report = await prisma.damageReport.create({
-        data: {
-          documentNumber,
-          reportDate: input.reportDate ?? new Date(),
-          reason: input.reason,
-          notes: input.notes,
-          warehouseId: input.warehouseId,
-          businessId: input.businessId,
-          items: { create: itemsData },
-        },
-        include: {
-          items: {
-            include: {
-              product: { select: { id: true, name: true, sku: true } },
+      const report = await withDocumentNumber(
+        input.businessId,
+        DOC_PREFIXES.DAMAGE_REPORT,
+        input.documentNumber,
+        (documentNumber) =>
+          prisma.damageReport.create({
+            data: {
+              documentNumber,
+              reportDate: input.reportDate ?? new Date(),
+              reason: input.reason,
+              notes: input.notes,
+              warehouseId: input.warehouseId,
+              businessId: input.businessId,
+              items: { create: itemsData },
             },
-          },
-          warehouse: { select: { id: true, name: true } },
-        },
-      });
+            include: {
+              items: {
+                include: {
+                  product: { select: { id: true, name: true, sku: true } },
+                },
+              },
+              warehouse: { select: { id: true, name: true } },
+            },
+          }),
+      );
 
       return report;
     } catch (error: unknown) {
@@ -812,6 +871,13 @@ export const confirmDamageReport = businessMemberProcedure
       }
 
       const confirmed = await prisma.$transaction(async (tx) => {
+        await lockProductsForUpdate(
+          tx,
+          report.items.map((item) => item.productId),
+        );
+
+        let writtenOff = new Prisma.Decimal(0);
+
         for (const item of report.items) {
           // Validate stock availability
           await validateStockAvailability(tx, {
@@ -827,6 +893,19 @@ export const confirmDamageReport = businessMemberProcedure
           const txnType =
             item.damageType === 'EXPIRED' ? 'EXPIRED_OUT' : 'DAMAGE_OUT';
 
+          // Written off at the value it was carried at — the loss is what the
+          // stock actually cost, not a figure entered on the report.
+          const unitCost = await resolveOutboundCost(tx, {
+            productId: item.productId,
+            warehouseId: report.warehouseId,
+            shelfId: item.shelfId,
+            batchId: item.batchId,
+          });
+
+          writtenOff = writtenOff.plus(
+            new Prisma.Decimal(item.quantity.toString()).mul(unitCost),
+          );
+
           await createLedgerEntry(tx, {
             transactionType: txnType,
             productId: item.productId,
@@ -835,7 +914,7 @@ export const confirmDamageReport = businessMemberProcedure
             batchId: item.batchId,
             businessId: input.businessId,
             quantity: item.quantity,
-            unitCost: item.unitCost,
+            unitCost,
             referenceTable: 'damage_reports',
             referenceId: report.id,
             transactionDate: report.reportDate,
@@ -850,6 +929,18 @@ export const confirmDamageReport = businessMemberProcedure
             });
           }
         }
+
+        // Damage and expiry are real losses: the stock is gone, so Inventory
+        // is relieved and the cost is expensed.
+        await postJournalEntry(tx, {
+          businessId: input.businessId,
+          source: 'DAMAGE_REPORT',
+          sourceId: report.id,
+          date: report.reportDate,
+          narration: `Damage Report ${report.documentNumber}`,
+          postedBy: ctx.userId,
+          lines: stockWriteOffPosting({ amount: writtenOff.toFixed(2) }),
+        });
 
         return tx.damageReport.update({
           where: { id: input.id },

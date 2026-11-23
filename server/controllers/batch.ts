@@ -334,7 +334,15 @@ export const deleteBatch = businessMemberProcedure
         });
       }
 
-      await prisma.productBatch.delete({ where: { id: input.id } });
+      // Scoped in the same statement as the delete: the ownership check
+      // above is a separate read, and nothing stops the row changing hands
+      // between the two.
+      const removed = await prisma.productBatch.deleteMany({
+        where: { id: input.id, product: { businessId: input.businessId } },
+      });
+      if (removed.count === 0) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Batch not found' });
+      }
       return { success: true };
     } catch (error: unknown) {
       handleControllerError(error, {

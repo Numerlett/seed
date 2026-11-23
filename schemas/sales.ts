@@ -8,6 +8,8 @@ export const saleInvoiceItemSchema = z.object({
   unitPrice: z.number().nonnegative('Unit price must be non-negative'),
   taxRate: z.number().min(0).max(100).default(0),
   discount: z.number().min(0).max(100).default(0),
+  /** GST compensation cess, charged on top of the GST rate. */
+  cessRate: z.number().min(0).max(100).optional(),
   shelfId: z.string().optional(),
   batchId: z.string().optional(),
 });

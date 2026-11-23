@@ -1,0 +1,32 @@
+{
+  "duplicateIrn": {
+    "ErrorDetails": [
+      {
+        "ErrorCode": "2150",
+        "ErrorMessage": "Duplicate IRN"
+      }
+    ]
+  },
+  "invalidBuyerGstin": {
+    "ErrorDetails": [
+      {
+        "ErrorCode": "2172",
+        "ErrorMessage": "For intra state transaction IGST amounts is not applicable for item list and invoice, only CGST and SGST are applicable"
+      }
+    ]
+  },
+  "expiredToken": {
+    "ErrorDetails": [
+      {
+        "ErrorCode": "1005",
+        "ErrorMessage": "Invalid Token"
+      }
+    ]
+  },
+  "multiple": {
+    "ErrorDetails": [
+      { "ErrorCode": "2189", "ErrorMessage": "Invalid total invoice value" },
+      { "ErrorCode": "2233", "ErrorMessage": "Recipient GSTIN state code does not match with state code" }
+    ]
+  }
+}

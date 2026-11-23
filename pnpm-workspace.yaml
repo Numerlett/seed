@@ -10,3 +10,16 @@ packages:
   - tax
   - accounting
   - integrations
+
+# Dependencies permitted to run install scripts. pnpm 11 reads this here; the
+# `pnpm.onlyBuiltDependencies` field in package.json is no longer consulted.
+# Allowed entries compile native binaries and do not work without it. core-js
+# is denied because its install script only prints a funding notice.
+allowBuilds:
+  '@prisma/engines': true
+  core-js: false
+  esbuild: true
+  msgpackr-extract: true
+  prisma: true
+  sharp: true
+  unrs-resolver: true

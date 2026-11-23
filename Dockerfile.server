@@ -94,4 +94,7 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "require('http').get('http://127.0.0.1:8080/health', r => process.exit(r.statusCode === 200 ? 0 : 1))"
 
-CMD ["sh", "-c", "pnpm --filter @seed/database db:deploy && node server/dist/index.js"]
+# Migrations run in Fly's release_command (see fly.toml), not here: with
+# scale-to-zero every cold start would otherwise pay migration latency, and
+# simultaneous machine starts would contend on the migration advisory lock.
+CMD ["node", "server/dist/index.js"]

@@ -79,7 +79,12 @@ export type EInvoicePayload = {
 };
 
 export type EInvoiceResponse = {
-  AckNo: string;
+  /**
+   * The portal sends this as a JSON number, not a string — it is declared as
+   * both because the type claiming `string` is what let a successful filing
+   * blow up while being saved to a text column.
+   */
+  AckNo: string | number;
   AckDt: string;
   Irn: string;
   SignedInvoice: string;
@@ -167,6 +172,51 @@ export async function cancelIRN(irn: string, reason: 1 | 2 | 3 | 4 | 5, remarks:
       },
     },
   );
+
+  return resp.data;
+}
+
+export type EWayBillByIrnPayload = {
+  Irn: string;
+  Distance: number;
+  TransMode?: '1' | '2' | '3' | '4';
+  TransId?: string;
+  TransName?: string;
+  TransDocDt?: string;
+  TransDocNo?: string;
+  VehNo?: string;
+  VehType?: 'R' | 'O';
+};
+
+export type EWayBillResponse = {
+  EwbNo: number | string;
+  EwbDt: string;
+  EwbValidTill: string;
+};
+
+/**
+ * Generates an e-way bill for an invoice that already has an IRN.
+ *
+ * The IRP exposes this separately from the standalone e-way bill API: once an
+ * invoice is registered, the EWB is raised against its IRN rather than by
+ * re-submitting the invoice details.
+ */
+export async function generateEWayBillByIrn(
+  payload: EWayBillByIrnPayload,
+): Promise<EWayBillResponse> {
+  const config = getConfig();
+  const token = await getAuthToken(config);
+
+  const resp = await axios.post(`${config.baseUrl}/einvoice/v1.03/ewaybill`, payload, {
+    params: { action: 'GENEWAYBILL', gstin: config.gstin },
+    headers: {
+      'client-id': config.clientId,
+      'client-secret': config.clientSecret,
+      'gstin': config.gstin,
+      'user_name': config.username,
+      'authtoken': token,
+    },
+  });
 
   return resp.data;
 }

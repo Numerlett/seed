@@ -1,4 +1,14 @@
 import { prisma } from '@seed/database';
+import { money, toMoneyNumber } from '@seed/accounting';
+import { inclusiveRange } from '../../../helpers/dateRange';
+import { logger } from '../../../helpers/logger';
+
+/**
+ * Ceiling on rows loaded for reports that cannot be paginated without changing
+ * their meaning. Reaching it means the report is too wide to be useful anyway.
+ */
+const MAX_STATEMENT_ROWS_PER_SOURCE = 1000;
+const MAX_STOCK_SUMMARY_ROWS = 5000;
 
 export async function getStockSummary(businessId: string, warehouseId?: string) {
   // InventoryStock doesn't have businessId — filter via warehouse
@@ -15,7 +25,15 @@ export async function getStockSummary(businessId: string, warehouseId?: string) 
       warehouse: { select: { name: true } },
     },
     orderBy: { product: { name: 'asc' } },
+    take: MAX_STOCK_SUMMARY_ROWS,
   });
+
+  if (stocks.length === MAX_STOCK_SUMMARY_ROWS) {
+    logger.warn(
+      { businessId, warehouseId, cap: MAX_STOCK_SUMMARY_ROWS },
+      'Stock summary hit its row cap and is incomplete; it needs pagination',
+    );
+  }
 
   return stocks.map((s) => ({
     productId: s.productId,
@@ -34,7 +52,7 @@ export async function getSalesRegister(
   const skip = (input.page - 1) * input.limit;
   const where = {
     businessId,
-    invoiceDate: { gte: input.dateFrom, lte: input.dateTo },
+    invoiceDate: inclusiveRange(input.dateFrom, input.dateTo),
     status: 'CONFIRMED' as const,
   };
 
@@ -60,20 +78,20 @@ export async function getSalesRegister(
       invoiceDate: inv.invoiceDate,
       customerName: inv.customer?.name,
       customerGstin: inv.customer?.gstin,
-      taxableAmount: Number(inv.taxableAmount ?? 0),
-      cgst: Number(inv.cgstAmount ?? 0),
-      sgst: Number(inv.sgstAmount ?? 0),
-      igst: Number(inv.igstAmount ?? 0),
-      grandTotal: Number(inv.grandTotal),
+      taxableAmount: toMoneyNumber(inv.taxableAmount),
+      cgst: toMoneyNumber(inv.cgstAmount),
+      sgst: toMoneyNumber(inv.sgstAmount),
+      igst: toMoneyNumber(inv.igstAmount),
+      grandTotal: toMoneyNumber(inv.grandTotal),
     })),
     total,
     page: input.page,
     summary: {
-      grandTotal: Number(agg?._sum?.grandTotal ?? 0),
-      taxableAmount: Number(agg?._sum?.taxableAmount ?? 0),
-      cgst: Number(agg?._sum?.cgstAmount ?? 0),
-      sgst: Number(agg?._sum?.sgstAmount ?? 0),
-      igst: Number(agg?._sum?.igstAmount ?? 0),
+      grandTotal: toMoneyNumber(agg?._sum?.grandTotal),
+      taxableAmount: toMoneyNumber(agg?._sum?.taxableAmount),
+      cgst: toMoneyNumber(agg?._sum?.cgstAmount),
+      sgst: toMoneyNumber(agg?._sum?.sgstAmount),
+      igst: toMoneyNumber(agg?._sum?.igstAmount),
     },
   };
 }
@@ -85,7 +103,7 @@ export async function getPurchaseRegister(
   const skip = (input.page - 1) * input.limit;
   const where = {
     businessId,
-    orderDate: { gte: input.dateFrom, lte: input.dateTo },
+    orderDate: inclusiveRange(input.dateFrom, input.dateTo),
     status: 'CONFIRMED' as const,
   };
 
@@ -111,17 +129,17 @@ export async function getPurchaseRegister(
       orderDate: po.orderDate,
       supplierName: po.supplier?.name,
       supplierGstin: po.supplier?.gstin,
-      taxableAmount: Number(po.taxableAmount ?? 0),
-      cgst: Number(po.cgstAmount ?? 0),
-      sgst: Number(po.sgstAmount ?? 0),
-      igst: Number(po.igstAmount ?? 0),
-      grandTotal: Number(po.grandTotal),
+      taxableAmount: toMoneyNumber(po.taxableAmount),
+      cgst: toMoneyNumber(po.cgstAmount),
+      sgst: toMoneyNumber(po.sgstAmount),
+      igst: toMoneyNumber(po.igstAmount),
+      grandTotal: toMoneyNumber(po.grandTotal),
     })),
     total,
     page: input.page,
     summary: {
-      grandTotal: Number(agg?._sum?.grandTotal ?? 0),
-      taxableAmount: Number(agg?._sum?.taxableAmount ?? 0),
+      grandTotal: toMoneyNumber(agg?._sum?.grandTotal),
+      taxableAmount: toMoneyNumber(agg?._sum?.taxableAmount),
     },
   };
 }
@@ -131,37 +149,69 @@ export async function getPartyStatement(
   partyId: string,
   input: { dateFrom: Date; dateTo: Date },
 ) {
+  // A running-balance statement needs every row in the range, so it cannot be
+  // paginated without changing what the balance means. Cap each source instead
+  // and tell the caller when the range was too wide, rather than loading an
+  // unbounded result set into memory.
+  const take = MAX_STATEMENT_ROWS_PER_SOURCE + 1;
+
   const [sales, purchases, payments] = await Promise.all([
     prisma.saleInvoice.findMany({
-      where: { businessId, customerId: partyId, invoiceDate: { gte: input.dateFrom, lte: input.dateTo }, status: 'CONFIRMED' },
+      where: { businessId, customerId: partyId, invoiceDate: inclusiveRange(input.dateFrom, input.dateTo), status: 'CONFIRMED' },
       orderBy: { invoiceDate: 'asc' },
       select: { id: true, documentNumber: true, invoiceDate: true, grandTotal: true },
+      take,
     }),
     prisma.purchaseOrder.findMany({
-      where: { businessId, supplierId: partyId, orderDate: { gte: input.dateFrom, lte: input.dateTo }, status: 'CONFIRMED' },
+      where: { businessId, supplierId: partyId, orderDate: inclusiveRange(input.dateFrom, input.dateTo), status: 'CONFIRMED' },
       orderBy: { orderDate: 'asc' },
       select: { id: true, documentNumber: true, orderDate: true, grandTotal: true },
+      take,
     }),
     prisma.payment.findMany({
-      where: { businessId, partyId, date: { gte: input.dateFrom, lte: input.dateTo } },
+      where: { businessId, partyId, date: inclusiveRange(input.dateFrom, input.dateTo) },
       orderBy: { date: 'asc' },
       select: { id: true, documentNumber: true, date: true, amount: true, type: true },
+      take,
     }),
   ]);
 
+  const truncated =
+    sales.length > MAX_STATEMENT_ROWS_PER_SOURCE ||
+    purchases.length > MAX_STATEMENT_ROWS_PER_SOURCE ||
+    payments.length > MAX_STATEMENT_ROWS_PER_SOURCE;
+
+  // Amounts stay Decimal through the sort and the running total. Accumulating
+  // `Number` deltas over a few thousand statement rows drifts far enough to
+  // show a closing balance that disagrees with the invoices it is made of.
+  const zero = money(0);
   const ledger = [
-    ...sales.map((s) => ({ date: s.invoiceDate, docNo: s.documentNumber, description: 'Sale Invoice', debit: Number(s.grandTotal), credit: 0 })),
-    ...purchases.map((p) => ({ date: p.orderDate, docNo: p.documentNumber, description: 'Purchase', debit: 0, credit: Number(p.grandTotal) })),
-    ...payments.map((p) => ({ date: p.date, docNo: p.documentNumber, description: `Payment ${p.type}`, debit: p.type === 'MADE' ? 0 : Number(p.amount), credit: p.type === 'RECEIVED' ? 0 : Number(p.amount) })),
+    ...sales.map((s) => ({ date: s.invoiceDate, docNo: s.documentNumber, description: 'Sale Invoice', debit: money(s.grandTotal), credit: zero })),
+    ...purchases.map((p) => ({ date: p.orderDate, docNo: p.documentNumber, description: 'Purchase', debit: zero, credit: money(p.grandTotal) })),
+    ...payments.map((p) => ({ date: p.date, docNo: p.documentNumber, description: `Payment ${p.type}`, debit: p.type === 'MADE' ? zero : money(p.amount), credit: p.type === 'RECEIVED' ? zero : money(p.amount) })),
   ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  let runningBalance = 0;
+  let runningBalance = zero;
   const rows = ledger.map((row) => {
-    runningBalance += row.debit - row.credit;
-    return { ...row, balance: runningBalance };
+    runningBalance = runningBalance.plus(row.debit).minus(row.credit);
+    return {
+      date: row.date,
+      docNo: row.docNo,
+      description: row.description,
+      debit: toMoneyNumber(row.debit),
+      credit: toMoneyNumber(row.credit),
+      balance: toMoneyNumber(runningBalance),
+    };
   });
 
-  return { rows, closingBalance: runningBalance };
+  return {
+    rows,
+    closingBalance: toMoneyNumber(runningBalance),
+    truncated,
+    ...(truncated && {
+      truncationNotice: `Showing the first ${MAX_STATEMENT_ROWS_PER_SOURCE} entries per document type. Narrow the date range for a complete statement.`,
+    }),
+  };
 }
 
 export async function getLowStockReport(businessId: string) {

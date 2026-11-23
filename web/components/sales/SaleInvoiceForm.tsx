@@ -49,6 +49,7 @@ export default function SaleInvoiceForm() {
           unitPrice: 0,
           taxRate: 0,
           discount: 0,
+          cessRate: 0,
         },
       ],
     },
@@ -229,6 +230,7 @@ export default function SaleInvoiceForm() {
                   unitPrice: 0,
                   taxRate: 0,
                   discount: 0,
+                  cessRate: 0,
                 })
               }
             >

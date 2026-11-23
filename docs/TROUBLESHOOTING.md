@@ -386,8 +386,8 @@ return children;
 
 ```bash
 # Use test user credentials
-TEST_USER_EMAIL=test@example.com
-TEST_USER_OTP=123456
+TEST_MAIL=test@example.com
+TEST_OTP=123456
 
 # Login with test@example.com
 # Use OTP: 123456
@@ -739,6 +739,54 @@ curl http://localhost:3000
 - **8080**: Express backend
 - **5432**: PostgreSQL database
 - **5555**: Prisma Studio
+
+---
+
+## Server refuses to start in long-running mode
+
+**Symptom**: the process exits immediately with a message about
+`DEPLOYMENT_MODE=long-running` requiring BullMQ workers.
+
+**Cause**: this is deliberate. `jobs/queues.ts` defines nine queues and nothing
+consumes them, so in long-running mode every email, SMS, PDF and e-invoice
+would be enqueued and silently never delivered. The guard fails loudly instead
+of losing mail.
+
+**Fix**: set `DEPLOYMENT_MODE=serverless`, which runs that work inline. Remove
+the guard in `server/index.ts` only once a worker process actually exists.
+
+---
+
+## Confirming a document fails on the chart of accounts
+
+**Symptom**: confirming an invoice, purchase order or return throws
+`Chart of accounts is missing <code> for this business`.
+
+**Cause**: confirmation posts a journal entry inside the same transaction as
+the document, so books and documents commit together. The posting addresses
+accounts by code, and one it needs is absent for that business.
+
+**Fix**: add the missing account under Accounting → Chart of Accounts using the
+code from the error, or delete the business's accounts to let the default chart
+reseed on the next post. If the code is one of the defaults in
+`server/lib/accounting/chartOfAccounts.ts`, the seed predates that entry being
+added — reseeding resolves it.
+
+---
+
+## GST figures show as zero on an older document
+
+**Symptom**: an invoice or purchase confirmed some time ago reports zero
+CGST/SGST/IGST in the GSTR previews, while newer ones look correct.
+
+**Cause**: the GST breakup columns had no writer until recently. Documents
+confirmed before that fix kept their zeroed defaults; the migrations that added
+the columns are additive and deliberately do not backfill.
+
+**Fix**: re-confirm the document, or leave it if the data is pre-launch test
+data. Ask for a backfill migration if any of it is real — the historic
+inter-state classification needs care, since a party's state may have changed
+since the document was raised.
 
 ---
 

@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      # Available for integration tests under server/tests/integration.
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: seed
+          POSTGRES_PASSWORD: seed
+          POSTGRES_DB: seed_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U seed"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Prisma requires DATABASE_URL to be defined at generate time, and the
+      # integration suite connects to the service container above.
+      DATABASE_URL: postgresql://seed:seed@localhost:5432/seed_test
+      # Next reads this at build time; the value is never called during CI.
+      NEXT_PUBLIC_SERVER_BASE_URL: http://localhost:8080
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Generates the Prisma client and emits each workspace package's dist/,
+      # both of which the typecheck below depends on.
+      - name: Build
+        run: pnpm build
+
+      - name: Typecheck
+        run: pnpm lint
+
+      # The Postgres service starts empty. Apply every migration so the
+      # integration suites run against the real schema rather than failing on
+      # missing tables, then prove the Prisma schema describes exactly what those
+      # migrations built: a model edited without a migration fails here, not at
+      # the next deploy.
+      - name: Apply migrations
+        run: pnpm --filter @seed/database db:deploy
+
+      - name: Check schema matches migrations
+        run: pnpm --filter @seed/database db:drift
+
+      - name: Test
+        run: pnpm test

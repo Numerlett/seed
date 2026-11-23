@@ -114,8 +114,25 @@ export const communicationsRoutes = t.router({
       }),
     ),
 
-  // ---------- Render & log (preview / send) ----------
-  renderAndLog: businessMemberProcedure
+  // ---------- Preview ----------
+  // Renders only: no log row, no provider call, nothing the user has to undo.
+  previewTemplate: businessMemberProcedure
+    .input(
+      z.object({
+        businessId: z.string(),
+        templateId: z.string(),
+        variables: z.record(z.string(), z.union([z.string(), z.number()])),
+      }),
+    )
+    .query(({ input, ctx }) =>
+      ctrl.previewTemplate(ctx.businessId, {
+        templateId: input.templateId,
+        variables: input.variables,
+      }),
+    ),
+
+  // ---------- Send ----------
+  sendMessage: businessMemberProcedure
     .input(
       z.object({
         businessId: z.string(),
@@ -127,7 +144,7 @@ export const communicationsRoutes = t.router({
       }),
     )
     .mutation(({ input, ctx }) =>
-      ctrl.renderAndLog(ctx.businessId, {
+      ctrl.sendMessage(ctx.businessId, {
         templateId: input.templateId,
         to: input.to,
         variables: input.variables,
