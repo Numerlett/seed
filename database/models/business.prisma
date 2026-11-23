@@ -7,8 +7,11 @@ enum BusinessMembershipType {
   STAFF
 }
 
+/// How stock is valued when it leaves. Only weighted average is implemented:
+/// the outbound cost is `InventoryStock.currentValue / currentQuantity` at the
+/// moment of the movement. FIFO was offered here and implemented nowhere, so
+/// selecting it changed nothing while promising different books.
 enum CostingMethod {
-  FIFO
   WEIGHTED_AVERAGE
 }
 
@@ -57,6 +60,7 @@ model Business {
   stockAdjustments  StockAdjustment[]
   stockTransfers    StockTransfer[]
   damageReports     DamageReport[]
+  paymentLinks      PaymentLink[]
 
   // New modules
   gstRegistration    GSTRegistration?

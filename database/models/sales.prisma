@@ -55,6 +55,8 @@ model SaleInvoice {
   salesReturns SalesReturn[]
   eInvoice     EInvoice?
   eWayBill     EWayBill?
+  paymentLinks PaymentLink[]
+  paymentAllocations PaymentAllocation[]
 
   @@unique([businessId, documentNumber])
   @@index([businessId, invoiceDate])

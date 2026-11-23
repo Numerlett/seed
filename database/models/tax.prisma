@@ -58,6 +58,9 @@ model EInvoice {
   status        EInvoiceStatus @default(PENDING)
   cancelledAt   DateTime?
   cancelReason  String?
+  /// Why the IRP rejected the last attempt. Set with status FAILED so the
+  /// operator can see the portal's reason instead of a row stuck in PENDING.
+  failureReason String?  @db.Text
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -89,6 +92,8 @@ model EWayBill {
   distance       Int?
   transportMode  String?
   status         EWayBillStatus @default(PENDING)
+  /// Why the IRP rejected the last attempt, mirroring EInvoice.failureReason.
+  failureReason  String?  @db.Text
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

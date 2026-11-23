@@ -25,7 +25,7 @@ model BankAccount {
 model Payment {
   id            String        @id @default(cuid())
   businessId    String
-  documentNumber String       @unique
+  documentNumber String
   date          DateTime
   type          PaymentType
   amount        Decimal       @db.Decimal(15, 2)
@@ -43,6 +43,9 @@ model Payment {
   bankAccount   BankAccount?  @relation(fields: [bankAccountId], references: [id])
   allocations   PaymentAllocation[]
 
+  /// Scoped to the business, not global: two businesses both number their
+  /// first receipt RCP-0001, and a global unique made the second one fail.
+  @@unique([businessId, documentNumber])
   @@index([businessId, type, date])
   @@index([businessId, partyId])
   @@map("payments")
@@ -80,8 +83,17 @@ model PaymentAllocation {
   createdAt   DateTime @default(now())
 
   payment     Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  /// `amountPaid`, `amountDue` and `paymentStatus` on the settled document are
+  /// derived by summing these rows, so an allocation pointing at a document
+  /// that does not exist silently corrupts what the invoice reports as owing.
+  /// Restrict rather than cascade: a document with money against it must not be
+  /// deletable, and losing the allocation would change the payment's totals.
+  invoice     SaleInvoice?   @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  bill        PurchaseOrder? @relation(fields: [billId], references: [id], onDelete: Restrict)
 
   @@index([paymentId])
+  @@index([invoiceId])
+  @@index([billId])
   @@map("payment_allocations")
 }
 
@@ -138,4 +150,44 @@ model BankTransaction {
 enum BankTxType {
   CREDIT
   DEBIT
+}
+
+/// A hosted payment link raised against a sale invoice.
+///
+/// Tracks the provider's own identifiers so an incoming webhook can be matched
+/// back to the invoice it settles, and so replays of the same webhook — which
+/// every gateway sends — are recognised instead of recording the money twice.
+model PaymentLink {
+  id                String            @id @default(cuid())
+  businessId        String
+  invoiceId         String
+  provider          String            @default("RAZORPAY")
+  /// Provider's link id (Razorpay `plink_…`).
+  providerLinkId    String            @unique
+  shortUrl          String
+  amount            Decimal           @db.Decimal(15, 2)
+  currency          String            @default("INR")
+  status            PaymentLinkStatus @default(CREATED)
+  /// Provider's payment id (Razorpay `pay_…`). Unique so a replayed webhook
+  /// cannot create a second payment for the same collection.
+  providerPaymentId String?           @unique
+  paidAt            DateTime?
+  /// The Payment row this link produced once it was settled.
+  paymentId         String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  business          Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  invoice           SaleInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@index([invoiceId])
+  @@map("payment_links")
+}
+
+enum PaymentLinkStatus {
+  CREATED
+  PAID
+  CANCELLED
+  EXPIRED
 }

@@ -41,6 +41,8 @@ model PurchaseOrder {
 
   items             PurchaseOrderItem[]
   goodsReceiptNotes GoodsReceiptNote[]
+  paymentAllocations PaymentAllocation[]
+
 
   @@unique([businessId, documentNumber])
   @@index([businessId, orderDate])
