@@ -59,5 +59,16 @@ jobs:
       - name: Typecheck
         run: pnpm lint
 
+      # The Postgres service starts empty. Apply every migration so the
+      # integration suites run against the real schema rather than failing on
+      # missing tables, then prove the Prisma schema describes exactly what those
+      # migrations built: a model edited without a migration fails here, not at
+      # the next deploy.
+      - name: Apply migrations
+        run: pnpm --filter @seed/database db:deploy
+
+      - name: Check schema matches migrations
+        run: pnpm --filter @seed/database db:drift
+
       - name: Test
         run: pnpm test
